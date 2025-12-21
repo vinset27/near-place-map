@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Map, { Marker, NavigationControl, GeolocateControl, Popup, ViewStateChangeEvent } from 'react-map-gl';
 import { establishments } from '@/lib/data';
 import { MapPin, Navigation } from 'lucide-react';
@@ -25,12 +25,29 @@ export default function MapView({ interactive = true, userLocation, highlightedI
     pitch: 0
   });
 
-  const [selectedId, setSelectedId] = useState<string | null>(highlightedId || null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [, setLocation] = useLocation();
   const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null);
 
   const userLoc = userLocation || { lat: 5.3261, lng: -4.0200 };
   const selectedEstablishment = establishments.find(e => e.id === selectedId);
+
+  // Update selectedId when highlightedId prop changes
+  useEffect(() => {
+    if (highlightedId) {
+      setSelectedId(highlightedId);
+      // Auto-zoom to establishment when highlighted
+      const est = establishments.find(e => e.id === highlightedId);
+      if (est) {
+        setViewState(prev => ({
+          ...prev,
+          latitude: est.coordinates.lat,
+          longitude: est.coordinates.lng,
+          zoom: 15
+        }));
+      }
+    }
+  }, [highlightedId]);
 
   return (
     <div className="w-full h-full relative">
@@ -86,7 +103,7 @@ export default function MapView({ interactive = true, userLocation, highlightedI
           </Marker>
         ))}
 
-        {/* Route Layer */}
+        {/* Route Layer - Only shows if establishment is selected */}
         {selectedEstablishment && (
           <RouteLayer
             userLat={userLoc.lat}
