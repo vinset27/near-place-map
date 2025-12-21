@@ -11,12 +11,15 @@ import Onboarding from "@/pages/Onboarding";
 import Business from "@/pages/Business";
 import Profile from "@/pages/Profile";
 
+import Navigation from "@/pages/Navigation";
+
 function Router() {
   return (
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/list" component={List} />
       <Route path="/details/:id" component={Details} />
+      <Route path="/navigation" component={Navigation} />
       <Route path="/onboarding" component={Onboarding} />
       <Route path="/business" component={Business} />
       <Route path="/profile" component={Profile} />

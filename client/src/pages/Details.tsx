@@ -176,7 +176,10 @@ export default function Details() {
              <Phone className="w-4 h-4 mr-2" />
              Appeler
            </Button>
-           <Button className="flex-[2] bg-primary hover:bg-primary/90 text-primary-foreground font-bold h-12 rounded-xl">
+           <Button 
+             onClick={() => setLocation(`/navigation?id=${establishment.id}`)}
+             className="flex-[2] bg-primary hover:bg-primary/90 text-primary-foreground font-bold h-12 rounded-xl"
+           >
              <Navigation className="w-4 h-4 mr-2" />
              Itinéraire
            </Button>
