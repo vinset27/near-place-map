@@ -1,0 +1,489 @@
+L'application s'appelle : " O'Show
+
+Nom de code : NearPlace
+
+(le nom définitif sera travaillé plus tard)
+
+1.2 Vision stratégique
+
+Créer la première application ivoirienne de référence permettant aux utilisateurs de :
+
+trouver rapidement des caves, maquis et bars autour d’eux,
+
+visualiser l’itinéraire précis depuis leur position actuelle,
+
+vivre une expérience immersive, moderne et réaliste.
+
+Et pour les établissements :
+
+gagner en visibilité,
+
+attirer des clients géolocalisés,
+
+gérer leur présence via un abonnement mensuel.
+
+2. 👥 CIBLES
+
+2.1 Utilisateurs finaux
+
+Habitants d’Abidjan
+
+Personnes en déplacement
+
+Jeunes actifs, groupes d’amis, touristes locaux
+
+2.2 Clients payants (B2B)
+
+Caves
+
+Maquis
+
+Bars
+
+(puis restaurants, hôtels, lounges, événements)
+
+3. 📱 PLATEFORMES CIBLÉES
+
+Mobile : iOS & Android
+
+Technologie recommandée : React Native (Expo), Format web
+
+Backend : Render
+
+Base de données : Neon
+
+Paiement : Wave / Mobile Money
+
+4. 🧭 FONCTIONNALITÉ CENTRALE (GPS)
+
+Principe fondamental
+
+📍 La position de l’utilisateur est dynamique
+
+🏪 La position des établissements est fixe
+
+Aucun tracking abusif.
+
+La position utilisateur est recalculée à chaque ouverture / déplacement significatif.
+
+5. 🗺️ SYSTÈME DE CARTE (2D → 3D)
+
+5.1 Technologie recommandée
+
+👉 Mapbox (cartes modernes, 3D, navigation précise)
+
+Alternative : Google Maps (moins immersif)
+
+5.2 Fonctions cartographiques
+
+Carte 2D par défaut
+
+Mode 3D activable
+
+Bâtiments extrudés (zones urbaines)
+
+Orientation selon déplacement utilisateur
+
+Zoom intelligent
+
+5.3 Itinéraire ultra précis
+
+Tracé GPS depuis la position actuelle
+
+Mise à jour en temps réel
+
+Mode :
+
+🚶 à pied
+
+🚗 en voiture
+
+Indication distance + temps estimé
+
+Recalcul automatique si l’utilisateur dévie
+
+👉 L’itinéraire n’est pas décoratif, il est fonctionnel et précis.
+
+6. 🧱 ARCHITECTURE DES DONNÉES (simplifiée)
+
+6.1 Collection establishments
+
+id
+
+name
+
+category (cave, maquis, bar, futur : restaurant, hotel)
+
+latitude
+
+longitude
+
+commune
+
+quartier
+
+description
+
+photos[]
+
+horaires
+
+services (parking, écran, terrasse, etc.)
+
+abonnement_status
+
+abonnement_expiration
+
+verified (true/false)
+
+7. 🖥️ ÉCRANS & UX (CAS PAR CAS)
+
+🟢 ÉCRAN 1 — Splash Screen
+
+Animation Lottie fluide
+
+Logo animé
+
+Transition douce vers Home
+
+🟢 ÉCRAN 2 — Autorisation GPS
+
+UX pédagogique
+
+Texte clair :
+
+“Nous utilisons votre position uniquement pour vous montrer les lieux proches de vous.”
+
+Bouton :
+
+Autoriser
+
+Continuer sans GPS (fonctionnalités limitées)
+
+🟢 ÉCRAN 3 — Accueil (Carte principale)
+
+Éléments :
+
+Carte plein écran
+
+Marqueurs réalistes (icônes 3D légères)
+
+Position utilisateur animée
+
+Barre de recherche flottante
+
+Filtres rapides :
+
+Cave
+
+Maquis
+
+Bar
+
+Ouvert maintenant
+
+Distance
+
+🟢 ÉCRAN 4 — Liste à proximité
+
+Carte réduite + liste scrollable
+
+Tri :
+
+plus proche
+
+mieux noté
+
+sponsorisé
+
+Carte ↔ liste synchronisée
+
+🟢 ÉCRAN 5 — Fiche établissement (ultra immersive)
+
+Header :
+
+Images plein écran (slider)
+
+Effet parallaxe
+
+Lottie légère (lumières, ambiance)
+
+Contenu :
+
+Nom
+
+Distance réelle
+
+Temps de trajet
+
+Statut (ouvert / fermé)
+
+Description immersive
+
+Services (icônes)
+
+Boutons :
+
+Itinéraire
+
+Appeler
+
+WhatsApp
+
+Partager
+
+🟢 ÉCRAN 6 — Itinéraire 3D
+
+Carte 3D
+
+Tracé coloré
+
+Suivi en temps réel
+
+Indication vocale (future option)
+
+🟢 ÉCRAN 7 — Profil utilisateur
+
+Historique des lieux visités
+
+Favoris
+
+Préférences (types de lieux)
+
+8. 🏪 ESPACE ÉTABLISSEMENT (B2B)
+
+8.1 Inscription établissement
+
+Formulaire guidé
+
+Localisation par carte
+
+Upload photos
+
+Choix catégorie
+
+8.2 Tableau de bord
+
+Statut abonnement
+
+Visibilité
+
+Bouton renouveler
+
+Modifier infos
+
+9. 💳 MODÈLE ÉCONOMIQUE
+
+Abonnements mensuels (indicatif)
+
+Gratuit : visibilité minimale
+
+Basic : fiche complète
+
+Pro : mise en avant locale
+
+Premium : top résultats + badge
+
+👉 Paiement mensuel obligatoire pour rester actif.
+
+10. 🔐 SÉCURITÉ & MODÉRATION
+
+Vérification manuelle initiale
+
+Signalement par utilisateurs
+
+Désactivation automatique si abonnement expiré
+
+11. 🚀 ÉVOLUTIVITÉ (VISION LONG TERME)
+
+Prévu dès maintenant :
+
+Restaurants
+
+Hôtels
+
+Lounges
+
+Événements temporaires
+
+Publicités locales géolocalisées
+
+Statistiques avancées
+
+Aucune refonte majeure nécessaire.
+
+12. 🧠 POUR LES DÉVELOPPEURS (EXIGENCES)
+
+Code modulaire
+
+Architecture scalable
+
+UX fluide (60 fps)
+
+Lotties optimisées
+
+Cartes performantes
+
+Aucun tracking abusif
+
+🏁 CONCLUSION STRATÉGIQUE
+
+Tu ne construis pas une simple app.
+
+Tu poses les fondations d’une plateforme urbaine majeure.
+
+Ton idée est :
+
+visionnaire,
+
+monétisable,
+
+ancrée dans la réalité locale,
+
+extensible à l’infini.
+
+Dec 21, 10:36 PM
+
+Copy
+Robot
+Bienvenue sur Emergent – votre destination unique pour créer et déployer des applications prêtes pour la production. Je vois que vous souhaitez construire "O'Show", une application mobile immersive pour découvrir des lieux de sortie à Abidjan, avec un accent sur la géolocalisation précise et une expérience 3D. Je vais commencer à mettre en place l'architecture de données et les écrans clés pour donner vie à votre vision.
+
+
+Copy
+Robot
+I'll help you build O'Show (NearPlace) - an immersive geolocation mobile app for discovering caves, maquis, and bars in Abidjan! This is an exciting and well-thought-out project.
+
+Before I start planning and implementation, I need to clarify a few critical details:
+
+Ask Question
+Agent asked a question
+Answered
+Up
+Dec 21, 10:36 PM
+
+Copy
+Choix définitif : Mapbox
+
+✔️ Clé API publique Mapbox disponible
+
+Mapbox est la solution officielle pour :
+
+cartes 2D & 3D,
+
+bâtiments extrudés,
+
+navigation GPS précise,
+
+itinéraires temps réel.
+
+👉 Action d’intégration :
+
+Intégrer Mapbox via variables d’environnement
+
+Ne jamais exposer la clé en dur dans le code
+
+Prévoir une architecture modulaire (MapProvider)
+
+2. Système de paiement
+
+Décision : implémentation différée (architecture prête)
+
+Le système de paiement ne doit pas bloquer le MVP
+
+Une solution est déjà envisagée côté produit (non figée à ce stade)
+
+👉 À implémenter maintenant :
+
+gestion des statuts d’abonnement :
+
+active
+
+expired
+
+pending
+
+écrans abonnement + renouvellement
+
+logique backend prête à accueillir Wave / Mobile Money plus tard
+
+3. Données des établissements
+
+❌ Aucune base initiale fournie
+
+✅ Les établissements s’inscrivent eux-mêmes
+
+👉 Obligatoire :
+
+Interface Admin Web
+
+ajout manuel
+
+validation / vérification
+
+activation / suspension
+
+gestion abonnements
+
+👉 Aucun établissement n’est visible sans validation.
+
+4. Fonctionnalités MVP (Phase 1)
+
+Choix : TOUTES les fonctionnalités listées
+
+Le MVP doit inclure :
+
+✔️ Carte Mapbox + géolocalisation utilisateur
+
+✔️ Liste des établissements à proximité
+
+✔️ Navigation / itinéraire vers un établissement
+
+✔️ Système d’abonnement (logique complète, paiement branché plus tard)
+
+👉 Objectif : produit crédible, fonctionnel et monétisable dès V1
+
+5. Animations Lottie
+
+✔️ Bibliothèque Lottie déjà disponible
+
+Les animations seront fournies
+
+👉 Exigences :
+
+intégration optimisée (poids, performances)
+
+animations activables / remplaçables facilement
+
+usage subtil (UX premium, pas décoratif excessif)
+
+🔐 Règles techniques à respecter (non négociables)
+
+Mapbox = provider principal
+
+Position utilisateur dynamique uniquement
+
+Aucune collecte abusive de données
+
+Code modulaire et scalable
+
+UX fluide (objectif 60 fps)
+
+🟢 Feu vert pour intégration
+
+👉 Tu peux intégrer immédiatement :
+
+la clé Mapbox publique,
+
+la carte + GPS,
+
+les marqueurs établissements,
+
+l’itinéraire temps réel.
+
+Le reste (paiement final, extensions) viendra sans refonte.
+
+pk.eyJ1IjoidHJvdXZlcmNoYXAiLCJhIjoiY21qZzk4ZHExMTE2cjNkc2R5YnhvYnRqYyJ9.kLaJ7Fd3pBs8NzF6vOTwcA
+
+Dec 21, 10:54 PM
+
+Copy
