@@ -1,19 +1,59 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRoute, useLocation } from 'wouter';
 import { establishments } from '@/lib/data';
 import { ArrowLeft, Phone, Share2, Navigation, Clock, MapPin, Star, MessageCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { motion } from 'framer-motion';
+import { getRoute, formatDistance, formatDuration } from '@/lib/routing';
 
 export default function Details() {
   const [, params] = useRoute('/details/:id');
   const [, setLocation] = useLocation();
   const id = params?.id;
   const establishment = establishments.find(e => e.id === id);
+  
+  const [userLoc, setUserLoc] = useState({ lat: 5.3261, lng: -4.0200 });
+  const [routeInfo, setRouteInfo] = useState<any>(null);
+  const [routeLoading, setRouteLoading] = useState(true);
 
   useEffect(() => {
     window.scrollTo(0, 0);
   }, []);
+
+  useEffect(() => {
+    if (!establishment) return;
+
+    // Get user location
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition((position) => {
+        const loc = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        };
+        setUserLoc(loc);
+        fetchRoute(loc);
+      }, () => {
+        fetchRoute(userLoc);
+      });
+    } else {
+      fetchRoute(userLoc);
+    }
+  }, [establishment?.id]);
+
+  const fetchRoute = async (location: { lat: number; lng: number }) => {
+    if (!establishment) return;
+    
+    setRouteLoading(true);
+    const route = await getRoute(
+      location.lng,
+      location.lat,
+      establishment.coordinates.lng,
+      establishment.coordinates.lat,
+      'driving'
+    );
+    setRouteInfo(route);
+    setRouteLoading(false);
+  };
 
   if (!establishment) {
     return <div className="p-8 text-center text-white">Établissement non trouvé</div>;
@@ -80,10 +120,12 @@ export default function Details() {
                  <span className="ml-1 text-gray-400 text-xs">(128 avis)</span>
                </div>
                <div className="h-4 w-[1px] bg-white/20" />
-               <div className="flex items-center text-gray-300 text-sm">
-                 <Clock className="w-4 h-4 mr-1" />
-                 <span>10 min</span>
-               </div>
+               {!routeLoading && routeInfo && (
+                 <div className="flex items-center text-gray-300 text-sm">
+                   <Navigation className="w-4 h-4 mr-1" />
+                   <span>{formatDistance(routeInfo.distance)} • {formatDuration(routeInfo.duration)}</span>
+                 </div>
+               )}
             </div>
           </motion.div>
         </div>
@@ -91,6 +133,25 @@ export default function Details() {
 
       {/* Content Body */}
       <div className="px-6 py-6 space-y-6">
+        {/* Route Info Card */}
+        {!routeLoading && routeInfo && (
+          <motion.div 
+            initial={{ y: 10, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="bg-gradient-to-r from-primary/20 to-primary/5 border border-primary/30 rounded-xl p-4"
+          >
+            <div className="flex items-center justify-between">
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">Distance et durée</p>
+                <p className="text-lg font-bold text-primary">
+                  {formatDistance(routeInfo.distance)} • {formatDuration(routeInfo.duration)}
+                </p>
+              </div>
+              <Navigation className="w-8 h-8 text-primary opacity-50" />
+            </div>
+          </motion.div>
+        )}
+
         <section>
           <h2 className="text-lg font-bold text-white mb-2">À propos</h2>
           <p className="text-gray-400 leading-relaxed text-sm">
