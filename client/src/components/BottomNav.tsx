@@ -6,7 +6,7 @@ export default function BottomNav() {
   const [location] = useLocation();
 
   const navItems = [
-    { href: '/', icon: Map, label: 'Carte' },
+    { href: '/app', icon: Map, label: 'Carte' },
     { href: '/list', icon: List, label: 'Liste' },
     { href: '/business', icon: PlusCircle, label: 'Ajouter', highlight: true },
     { href: '/profile', icon: User, label: 'Profil' },

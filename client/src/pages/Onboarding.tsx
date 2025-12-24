@@ -27,7 +27,7 @@ export default function Onboarding() {
         initial={{ y: 20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ delay: 0.2 }}
-        className="text-3xl font-display font-bold text-center mb-4 text-white"
+        className="text-3xl font-display font-bold text-center mb-4 text-foreground"
       >
         Activez la localisation
       </motion.h1>
@@ -48,7 +48,7 @@ export default function Onboarding() {
         className="w-full max-w-sm space-y-3"
       >
         <Button 
-          onClick={() => setLocation('/')} 
+          onClick={() => setLocation('/app')} 
           className="w-full h-12 text-lg font-bold rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground"
         >
           <Navigation className="w-5 h-5 mr-2" />
@@ -57,8 +57,8 @@ export default function Onboarding() {
         
         <Button 
           variant="ghost" 
-          onClick={() => setLocation('/')}
-          className="w-full text-muted-foreground hover:text-white"
+          onClick={() => setLocation('/app')}
+          className="w-full text-muted-foreground hover:text-foreground"
         >
           Continuer sans GPS
         </Button>

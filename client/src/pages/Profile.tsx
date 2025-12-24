@@ -1,57 +1,115 @@
-import React from 'react';
+import React, { useState } from 'react';
 import BottomNav from '@/components/BottomNav';
-import { User, Settings, CreditCard, Heart, LogOut } from 'lucide-react';
+import { Settings, LogOut, Building2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { apiRequest, getQueryFn, queryClient } from '@/lib/queryClient';
+import { useMutation, useQuery } from '@tanstack/react-query';
 
 export default function Profile() {
+  const { data } = useQuery<any | null>({
+    queryKey: ['/api/auth/me'],
+    queryFn: getQueryFn({ on401: 'returnNull' }),
+  });
+
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+
+  const login = useMutation({
+    mutationFn: async () => apiRequest('POST', '/api/auth/login', { username, password }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['/api/auth/me'] });
+    },
+  });
+
+  const register = useMutation({
+    mutationFn: async () => apiRequest('POST', '/api/auth/register', { username, password }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['/api/auth/me'] });
+    },
+  });
+
+  const logout = useMutation({
+    mutationFn: async () => apiRequest('POST', '/api/auth/logout'),
+    onSuccess: async () => {
+      await queryClient.setQueryData(['/api/auth/me'], null);
+    },
+  });
+
+  const isAuthed = !!data?.user;
+
   return (
     <div className="min-h-screen bg-background pb-20">
       <div className="p-6">
-        <h1 className="text-2xl font-display font-bold text-white mb-6">Mon Profil</h1>
-        
-        <div className="flex items-center space-x-4 mb-8">
-          <Avatar className="w-20 h-20 border-2 border-primary">
-            <AvatarImage src="https://github.com/shadcn.png" />
-            <AvatarFallback>CN</AvatarFallback>
-          </Avatar>
-          <div>
-            <h2 className="text-xl font-bold text-white">Alexandre Koffi</h2>
-            <p className="text-muted-foreground">Abidjan, Côte d'Ivoire</p>
-            <div className="mt-2 inline-flex px-2 py-0.5 rounded bg-primary/20 text-primary text-xs font-bold uppercase">
-              Membre VIP
+        <h1 className="text-2xl font-display font-bold text-foreground mb-6">
+          {isAuthed ? 'Espace établissement' : 'Connexion établissement'}
+        </h1>
+
+        {!isAuthed ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant={mode === 'login' ? 'default' : 'outline'} onClick={() => setMode('login')}>
+                Connexion
+              </Button>
+              <Button variant={mode === 'register' ? 'default' : 'outline'} onClick={() => setMode('register')}>
+                Inscription
+              </Button>
+            </div>
+
+            <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
+              <div className="space-y-2">
+                <Label>Email / Téléphone</Label>
+                <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="+225 07... ou email" />
+              </div>
+              <div className="space-y-2">
+                <Label>Mot de passe</Label>
+                <Input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="••••••••" />
+              </div>
+
+              <Button
+                className="w-full"
+                onClick={() => (mode === 'login' ? login.mutate() : register.mutate())}
+                disabled={login.isPending || register.isPending}
+              >
+                {mode === 'login' ? 'Se connecter' : 'Créer un compte'}
+              </Button>
             </div>
           </div>
-        </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-border bg-card p-4 flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl bg-primary/15 border border-primary/20 flex items-center justify-center">
+                <Building2 className="h-5 w-5 text-primary" />
+              </div>
+              <div className="flex-1">
+                <div className="text-sm text-muted-foreground">Connecté</div>
+                <div className="text-base font-bold text-foreground">{data.user.username}</div>
+              </div>
+              <Button variant="outline" size="sm">
+                <Settings className="h-4 w-4 mr-2" />
+                Paramètres
+              </Button>
+            </div>
 
-        <div className="space-y-1">
-          <MenuLink icon={Heart} label="Mes Favoris" />
-          <MenuLink icon={CreditCard} label="Abonnement" />
-          <MenuLink icon={Settings} label="Paramètres" />
-        </div>
+            <Separator className="my-2 bg-border" />
 
-        <Separator className="my-6 bg-white/10" />
-
-        <Button variant="destructive" className="w-full justify-start pl-4 bg-red-500/10 hover:bg-red-500/20 text-red-500 border-none">
-          <LogOut className="w-4 h-4 mr-3" />
-          Se déconnecter
-        </Button>
+            <Button
+              variant="destructive"
+              className="w-full justify-start pl-4 bg-red-500/10 hover:bg-red-500/20 text-red-500 border-none"
+              onClick={() => logout.mutate()}
+              disabled={logout.isPending}
+            >
+              <LogOut className="w-4 h-4 mr-3" />
+              Se déconnecter
+            </Button>
+          </div>
+        )}
       </div>
 
       <BottomNav />
     </div>
-  );
-}
-
-function MenuLink({ icon: Icon, label }: { icon: any, label: string }) {
-  return (
-    <button className="w-full flex items-center p-4 rounded-xl hover:bg-secondary transition-colors text-left group">
-      <div className="w-10 h-10 rounded-full bg-secondary group-hover:bg-background flex items-center justify-center mr-4 transition-colors border border-white/5">
-        <Icon className="w-5 h-5 text-white" />
-      </div>
-      <span className="text-base font-medium text-gray-200 group-hover:text-white flex-1">{label}</span>
-      <span className="text-muted-foreground text-lg">›</span>
-    </button>
   );
 }

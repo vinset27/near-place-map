@@ -37,12 +37,45 @@
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
   
-  --font-sans: 'Plus Jakarta Sans', sans-serif;
-  --font-display: 'Outfit', sans-serif;
+  --font-sans: 'Poppins', system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  --font-display: 'Poppins', system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
 }
 
 :root {
-  /* Dark Mode Default for Nightlife App */
+  /* Light theme (daytime) */
+  --background: 0 0% 100%;
+  --foreground: 222 47% 11%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+
+  --primary: 25 95% 53%; /* Vivid Orange for O'Show */
+  --primary-foreground: 210 40% 98%;
+
+  --secondary: 210 40% 96%;
+  --secondary-foreground: 222 47% 11%;
+
+  --muted: 210 40% 96%;
+  --muted-foreground: 215 16% 46%;
+
+  --accent: 25 95% 53%;
+  --accent-foreground: 210 40% 98%;
+
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 210 40% 98%;
+
+  --border: 214 32% 91%;
+  --input: 214 32% 91%;
+  --ring: 25 95% 53%;
+
+  --radius: 0.75rem;
+}
+
+.dark {
+  /* Dark theme (nighttime) */
   --background: 222 47% 11%; /* #0f172a - Slate 900 */
   --foreground: 210 40% 98%; /* Slate 50 */
 
@@ -70,11 +103,8 @@
   --border: 217 33% 17%;
   --input: 217 33% 17%;
   --ring: 25 95% 53%;
-
-  --radius: 0.75rem;
 }
 
-/* Force dark mode styles since it's a nightlife app */
 body {
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
@@ -83,6 +113,16 @@ body {
 
 h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-display);
+}
+
+/* Slightly reduce perceived size on desktop browsers */
+html {
+  font-size: 16px;
+}
+@media (min-width: 1024px) {
+  html {
+    font-size: 15px;
+  }
 }
 
 .mapboxgl-ctrl-logo {

@@ -1,10 +1,10 @@
 export interface Establishment {
   id: string;
   name: string;
-  category: "cave" | "maquis" | "bar" | "lounge" | "restaurant";
+  category: "cave" | "maquis" | "bar" | "lounge" | "restaurant" | "hotel" | "other";
   description: string;
   address: string;
-  commune: "Cocody" | "Marcory" | "Plateau" | "Yopougon" | "Biétry";
+  commune: "Cocody" | "Marcory" | "Plateau" | "Yopougon" | "Biétry" | string;
   coordinates: {
     lat: number;
     lng: number;
@@ -12,6 +12,7 @@ export interface Establishment {
   rating: number;
   isOpen: boolean;
   imageUrl: string;
+  photos?: string[];
   features: string[];
 }
 

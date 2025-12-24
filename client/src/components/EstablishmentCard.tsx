@@ -1,5 +1,5 @@
 import { Establishment } from '@/lib/data';
-import { Star, MapPin, Clock } from 'lucide-react';
+import { Star, MapPin, Hotel, UtensilsCrossed, Wine, Martini } from 'lucide-react';
 import { Link } from 'wouter';
 
 interface EstablishmentCardProps {
@@ -7,6 +7,22 @@ interface EstablishmentCardProps {
 }
 
 export default function EstablishmentCard({ establishment }: EstablishmentCardProps) {
+  const CategoryGlyph = (() => {
+    switch (establishment.category) {
+      case "restaurant":
+      case "maquis":
+        return UtensilsCrossed;
+      case "bar":
+        return Martini;
+      case "cave":
+        return Wine;
+      case "hotel":
+        return Hotel;
+      default:
+        return MapPin;
+    }
+  })();
+
   return (
     <Link href={`/details/${establishment.id}`}>
       <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all active:scale-95 cursor-pointer group">
@@ -26,6 +42,9 @@ export default function EstablishmentCard({ establishment }: EstablishmentCardPr
                {establishment.isOpen ? 'Ouvert' : 'Fermé'}
              </span>
           </div>
+          <div className="absolute bottom-2 right-2 h-8 w-8 rounded-full bg-black/55 backdrop-blur-md flex items-center justify-center border border-white/20">
+            <CategoryGlyph className="h-4 w-4 text-white" />
+          </div>
         </div>
         
         <div className="p-3">
@@ -40,12 +59,12 @@ export default function EstablishmentCard({ establishment }: EstablishmentCardPr
           
           <div className="flex flex-wrap gap-1 mt-2">
             {establishment.features.slice(0, 2).map((feature, i) => (
-              <span key={i} className="text-[10px] bg-secondary text-secondary-foreground px-1.5 py-0.5 rounded border border-white/5">
+              <span key={i} className="text-[10px] bg-secondary text-secondary-foreground px-1.5 py-0.5 rounded border border-border/60">
                 {feature}
               </span>
             ))}
              {establishment.features.length > 2 && (
-              <span className="text-[10px] bg-secondary text-secondary-foreground px-1.5 py-0.5 rounded border border-white/5">
+              <span className="text-[10px] bg-secondary text-secondary-foreground px-1.5 py-0.5 rounded border border-border/60">
                 +{establishment.features.length - 2}
               </span>
             )}

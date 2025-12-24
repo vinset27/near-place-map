@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
@@ -67,7 +68,8 @@ app.use((req, res, next) => {
     const message = err.message || "Internal Server Error";
 
     res.status(status).json({ message });
-    throw err;
+    // Don't crash the dev server on handled API errors.
+    console.error(err);
   });
 
   // importantly only setup vite in development and after
@@ -85,14 +87,15 @@ app.use((req, res, next) => {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || "5000", 10);
-  httpServer.listen(
-    {
+  // `reusePort` is not supported on Windows (Node will throw ENOTSUP).
+  // Enable it only on platforms that support SO_REUSEPORT.
+  const listenOptions: Parameters<typeof httpServer.listen>[0] = {
       port,
       host: "0.0.0.0",
-      reusePort: true,
-    },
-    () => {
+    ...(process.platform !== "win32" ? { reusePort: true } : {}),
+  };
+
+  httpServer.listen(listenOptions, () => {
       log(`serving on port ${port}`);
-    },
-  );
+  });
 })();

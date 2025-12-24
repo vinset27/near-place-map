@@ -1,32 +1,131 @@
-import React, { useState, useEffect } from 'react';
-import { useRoute, useLocation } from 'wouter';
+import React, { useRef, useState, useEffect } from 'react';
 import MapView from '@/components/Map';
 import { establishments } from '@/lib/data';
-import { ArrowLeft, Phone, MapPin, Clock, Navigation } from 'lucide-react';
+import { ArrowLeft, Crosshair, Phone, MapPin, Navigation, Satellite } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { formatDistance, formatDuration } from '@/lib/routing';
+import { type RouteInfo, formatDistance, formatDuration } from '@/lib/routing';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { fetchEstablishmentById, fetchEstablishmentsNearby, toUiEstablishment } from '@/lib/establishmentsApi';
+import { haversineMeters } from '@/lib/geo';
 
 export default function NavigationPage() {
-  const [, params] = useLocation();
   const id = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '').get('id');
-  const [, navigate] = useLocation();
+  const modeParam = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '').get('mode');
   
-  const establishment = establishments.find(e => e.id === id);
+  const local = establishments.find(e => e.id === id);
+  const [establishment, setEstablishment] = useState(local);
+  const [loadingEst, setLoadingEst] = useState(!local);
   const [userLoc, setUserLoc] = useState({ lat: 5.3261, lng: -4.0200 });
+  const [routeInfo, setRouteInfo] = useState<RouteInfo | null | undefined>(undefined);
+  const [accuracyM, setAccuracyM] = useState<number | undefined>(undefined);
+  const [heading, setHeading] = useState<number | null>(null);
+  const [navActive, setNavActive] = useState(false);
+  const [navMapStyle, setNavMapStyle] = useState<'navigation' | 'satellite'>('navigation');
+  const [travelMode, setTravelMode] = useState<'driving' | 'walking'>(
+    modeParam === 'walking' ? 'walking' : 'driving',
+  );
+  const [recenterSeq, setRecenterSeq] = useState(0);
+  const lastGpsRef = useRef<{ t: number; lat: number; lng: number } | null>(null);
+  const lastAccRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition((position) => {
-        setUserLoc({
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-        });
-      });
+      const watchId = navigator.geolocation.watchPosition(
+        (position) => {
+          const next = { lat: position.coords.latitude, lng: position.coords.longitude };
+          const now = Date.now();
+          const last = lastGpsRef.current;
+          const acc = position.coords.accuracy;
+          if (last) {
+            const moved = haversineMeters({ lat: last.lat, lng: last.lng }, next);
+            // Reduce jitter + excessive rerenders on mobile.
+            if (now - last.t < 200 && moved < 3) {
+              setAccuracyM(acc);
+              setHeading(position.coords.heading ?? null);
+              return;
+            }
+
+            // Ignore very suspicious jumps when accuracy is poor (common on mobile).
+            const lastAcc = lastAccRef.current;
+            if (typeof acc === "number" && acc > 60 && moved > 40 && now - last.t < 1200) {
+              setAccuracyM(acc);
+              setHeading(position.coords.heading ?? null);
+              return;
+            }
+            if (lastAcc && acc && acc > lastAcc * 1.8 && moved > 25 && now - last.t < 1200) {
+              setAccuracyM(acc);
+              setHeading(position.coords.heading ?? null);
+              return;
+            }
+          }
+          lastGpsRef.current = { t: now, lat: next.lat, lng: next.lng };
+          lastAccRef.current = acc ?? null;
+          setUserLoc(next);
+          setAccuracyM(acc);
+          setHeading(position.coords.heading ?? null);
+        },
+        () => {
+          // Keep default if permission denied/unavailable
+          setUserLoc({ lat: 5.3261, lng: -4.0200 });
+          setAccuracyM(undefined);
+          setHeading(null);
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 0,
+          timeout: 10000,
+        },
+      );
+
+      return () => {
+        navigator.geolocation.clearWatch(watchId);
+      };
     }
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      if (!id) return;
+      const found = establishments.find((e) => e.id === id);
+      if (found) {
+        setEstablishment(found);
+        setLoadingEst(false);
+        return;
+      }
+      setLoadingEst(true);
+      try {
+        const api = await fetchEstablishmentById(id);
+        if (!alive) return;
+        setEstablishment(api ? toUiEstablishment(api) : undefined);
+      } finally {
+        if (alive) setLoadingEst(false);
+      }
+    };
+    load();
+    return () => {
+      alive = false;
+    };
+  }, [id]);
+
+  const openExternalNavigation = () => {
+    if (!establishment) return;
+    const destination = `${establishment.coordinates.lat},${establishment.coordinates.lng}`;
+
+    // Mobile-first: omit `origin` so Google Maps uses the phone's native GPS location,
+    // which is often much more accurate than browser geolocation over Wi‑Fi IP HTTP.
+    const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+      destination,
+    )}&travelmode=${travelMode}&dir_action=navigate`;
+    window.open(googleMapsUrl, '_blank', 'noopener,noreferrer');
+  };
+
   if (!establishment) {
-    return <div className="p-8 text-center text-white">Établissement non trouvé</div>;
+    return (
+      <div className="p-8 text-center text-foreground">
+        {loadingEst ? "Chargement…" : "Établissement non trouvé"}
+      </div>
+    );
   }
 
   return (
@@ -36,6 +135,13 @@ export default function NavigationPage() {
         <MapView 
           userLocation={userLoc}
           highlightedId={id || ''}
+          onRouteInfoChange={setRouteInfo}
+          followUser={navActive}
+          userHeading={heading}
+          navMapStyle={navMapStyle}
+          recenterSeq={recenterSeq}
+          routeMode={travelMode}
+          establishmentsData={establishment ? [establishment, ...establishments] : establishments}
         />
       </div>
 
@@ -43,60 +149,164 @@ export default function NavigationPage() {
       <div className="absolute top-0 left-0 right-0 z-10 p-4 bg-gradient-to-b from-background/80 to-transparent flex items-center space-x-3">
         <button 
           onClick={() => window.history.back()}
-          className="w-10 h-10 rounded-full bg-background/40 backdrop-blur-md flex items-center justify-center text-white hover:bg-background/60 transition-colors"
+          className="w-10 h-10 rounded-full bg-background/40 backdrop-blur-md flex items-center justify-center text-foreground hover:bg-background/60 transition-colors"
         >
           <ArrowLeft className="w-5 h-5" />
         </button>
         <div className="flex-1">
-          <h1 className="font-display font-bold text-white truncate">{establishment.name}</h1>
-          <p className="text-xs text-gray-300 capitalize">{establishment.category}</p>
+          <h1 className="font-display font-bold text-foreground truncate">{establishment.name}</h1>
+          <p className="text-xs text-muted-foreground capitalize">{establishment.category}</p>
         </div>
       </div>
 
-      {/* Bottom Info Card */}
-      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-background via-background/95 to-transparent p-6 pb-safe">
-        <div className="bg-card border border-white/10 rounded-2xl p-4 space-y-4">
-          {/* Establishment Header */}
-          <div>
-            <h2 className="font-display font-bold text-xl text-white mb-1">{establishment.name}</h2>
-            <div className="flex items-center text-muted-foreground text-sm">
-              <MapPin className="w-4 h-4 mr-2" />
-              <span>{establishment.address}</span>
+      {/* Bottom UI */}
+      {!navActive ? (
+        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-background via-background/95 to-transparent p-6 pb-safe">
+          <div className="bg-card border border-border rounded-2xl p-4 space-y-4">
+            {/* Establishment Header */}
+            <div className="flex items-center gap-3">
+              <img
+                src={establishment.imageUrl}
+                alt={establishment.name}
+                className="h-12 w-12 rounded-xl object-cover border border-border"
+              />
+              <div className="min-w-0">
+                <h2 className="font-display font-bold text-lg text-foreground truncate">{establishment.name}</h2>
+                <div className="flex items-center text-muted-foreground text-xs truncate">
+                  <MapPin className="w-3.5 h-3.5 mr-1" />
+                  <span className="truncate">{establishment.address}</span>
+                </div>
+              </div>
             </div>
-          </div>
 
-          {/* Distance Info */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-primary/10 border border-primary/20 rounded-xl p-3">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Distance</p>
-              <p className="text-lg font-bold text-primary">
-                {establishment.address.includes('Plateau') ? '1.5 km' : '2.3 km'}
+            {/* Distance Info */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-primary/10 border border-primary/20 rounded-xl p-3">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Distance</p>
+                <p className="text-base font-bold text-primary">
+                  {routeInfo === undefined
+                    ? 'Calcul...'
+                    : routeInfo === null
+                      ? 'Indispo'
+                      : formatDistance(routeInfo.distance)}
+                </p>
+              </div>
+              <div className="bg-primary/10 border border-primary/20 rounded-xl p-3">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Durée</p>
+                <p className="text-base font-bold text-primary">
+                  {routeInfo === undefined
+                    ? 'Calcul...'
+                    : routeInfo === null
+                      ? 'Indispo'
+                      : formatDuration(routeInfo.duration)}
+                </p>
+              </div>
+            </div>
+
+            {accuracyM !== undefined && (
+              <p className="text-xs text-muted-foreground">
+                Précision localisation: ~{Math.round(accuracyM)} m
               </p>
-            </div>
-            <div className="bg-primary/10 border border-primary/20 rounded-xl p-3">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Durée</p>
-              <p className="text-lg font-bold text-primary">
-                {establishment.address.includes('Plateau') ? '8 min' : '12 min'}
-              </p>
-            </div>
-          </div>
+            )}
 
-          {/* Description */}
-          <p className="text-sm text-gray-400 line-clamp-2">{establishment.description}</p>
+            {/* Action Buttons */}
+            <div className="flex space-x-3 pt-1">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTravelMode('driving')}
+                  className={`px-3 h-12 rounded-xl text-xs font-bold border ${
+                    travelMode === 'driving'
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'bg-background text-foreground border-border'
+                  }`}
+                >
+                  Voiture
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTravelMode('walking')}
+                  className={`px-3 h-12 rounded-xl text-xs font-bold border ${
+                    travelMode === 'walking'
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'bg-background text-foreground border-border'
+                  }`}
+                >
+                  À pied
+                </button>
+              </div>
+              <Button className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold h-12 rounded-xl">
+                <Phone className="w-4 h-4 mr-2" />
+                Appeler
+              </Button>
+              <Button
+                onClick={() => setNavActive(true)}
+                className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground font-bold h-12 rounded-xl"
+              >
+                <Navigation className="w-4 h-4 mr-2" />
+                Démarrer
+              </Button>
+            </div>
 
-          {/* Action Buttons */}
-          <div className="flex space-x-3 pt-2">
-            <Button className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold h-12 rounded-xl">
-              <Phone className="w-4 h-4 mr-2" />
-              Appeler
-            </Button>
-            <Button className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground font-bold h-12 rounded-xl">
-              <Navigation className="w-4 h-4 mr-2" />
-              Naviguer
-            </Button>
+            <button
+              type="button"
+              onClick={openExternalNavigation}
+              className="w-full text-xs text-muted-foreground hover:text-foreground underline underline-offset-4"
+            >
+              Ouvrir dans Google Maps (optionnel)
+            </button>
           </div>
         </div>
-      </div>
+      ) : (
+        <div className="fixed bottom-0 left-0 right-0 z-40 px-4 pb-safe pointer-events-none">
+          <div className="mx-auto max-w-xl pb-4 pointer-events-auto">
+            <div className="rounded-2xl bg-background/90 backdrop-blur-xl border border-border shadow-xl p-3 flex items-center gap-3">
+              <Avatar className="h-10 w-10 border border-border">
+                <AvatarImage src="" />
+                <AvatarFallback>U</AvatarFallback>
+              </Avatar>
+
+              <div className="min-w-0 flex-1">
+                <div className="text-xs text-muted-foreground">Navigation</div>
+                <div className="text-sm font-semibold truncate">
+                  {routeInfo ? `${formatDistance(routeInfo.distance)} • ${formatDuration(routeInfo.duration)}` : "En cours…"}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap justify-end">
+                <Button
+                  variant="outline"
+                  className="h-10 px-3"
+                  onClick={() => setRecenterSeq((n) => n + 1)}
+                >
+                  <Crosshair className="w-4 h-4 mr-2" />
+                  <span className="hidden sm:inline">Recentrer</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-10 px-3"
+                  onClick={() => setNavMapStyle((v) => (v === 'navigation' ? 'satellite' : 'navigation'))}
+                >
+                  <Satellite className="w-4 h-4 mr-2" />
+                  <span className="hidden sm:inline">{navMapStyle === 'satellite' ? 'Route' : 'Satellite'}</span>
+                </Button>
+                <img
+                  src={establishment.imageUrl}
+                  alt={establishment.name}
+                  className="h-10 w-10 rounded-xl object-cover border border-border"
+                />
+                <Button
+                  variant="destructive"
+                  className="h-10 px-3"
+                  onClick={() => setNavActive(false)}
+                >
+                  Stop
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

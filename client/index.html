@@ -4,6 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
 
+    <!-- Default theme by time (20:27–06:27 => dark, else light). Runs before CSS to avoid flash. -->
+    <script>
+      (function () {
+        function shouldUseDark(d) {
+          var minutes = d.getHours() * 60 + d.getMinutes();
+          var start = 20 * 60 + 27;
+          var end = 6 * 60 + 27;
+          return minutes >= start || minutes < end;
+        }
+        var root = document.documentElement;
+        if (shouldUseDark(new Date())) root.classList.add("dark");
+        else root.classList.remove("dark");
+      })();
+    </script>
+
     <meta property="og:title" content="O'Show - Sortez à Abidjan" />
     <meta property="og:description" content="Découvrez les meilleures caves, maquis et bars autour de vous à Abidjan. Expérience immersive et géolocalisation précise." />
     <meta property="og:type" content="website" />
@@ -16,7 +31,7 @@
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link href='https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css' rel='stylesheet' />
   </head>
   <body>
