@@ -15,6 +15,11 @@ export function mapGoogleTypesToCategory(types: string[] | undefined): string {
   const t = new Set((types || []).map((x) => x.toLowerCase()));
   if (t.has("lodging")) return "hotel";
   if (t.has("liquor_store")) return "cave";
+  if (t.has("pharmacy") || t.has("drugstore")) return "pharmacy";
+  if (t.has("police") || t.has("police_station")) return "police";
+  if (t.has("hospital") || t.has("doctor") || t.has("health")) return "hospital";
+  if (t.has("fire_station") || t.has("ambulance")) return "emergency";
+  if (t.has("event_venue")) return "organizer";
   if (t.has("restaurant") || t.has("meal_takeaway") || t.has("meal_delivery")) return "restaurant";
   if (t.has("night_club")) return "lounge";
   if (t.has("bar") || t.has("cafe")) return "bar";

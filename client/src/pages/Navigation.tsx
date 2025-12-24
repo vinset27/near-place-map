@@ -7,15 +7,22 @@ import { type RouteInfo, formatDistance, formatDuration } from '@/lib/routing';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { fetchEstablishmentById, fetchEstablishmentsNearby, toUiEstablishment } from '@/lib/establishmentsApi';
 import { haversineMeters } from '@/lib/geo';
+import { telHref } from '@/lib/contact';
 
 export default function NavigationPage() {
-  const id = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '').get('id');
-  const modeParam = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '').get('mode');
+  const sp = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
+  const id = sp.get('id');
+  const modeParam = sp.get('mode');
+  const slat = Number(sp.get('slat'));
+  const slng = Number(sp.get('slng'));
   
   const local = establishments.find(e => e.id === id);
   const [establishment, setEstablishment] = useState(local);
   const [loadingEst, setLoadingEst] = useState(!local);
-  const [userLoc, setUserLoc] = useState({ lat: 5.3261, lng: -4.0200 });
+  const [userLoc, setUserLoc] = useState(() => {
+    if (Number.isFinite(slat) && Number.isFinite(slng)) return { lat: slat, lng: slng };
+    return { lat: 5.3261, lng: -4.0200 };
+  });
   const [routeInfo, setRouteInfo] = useState<RouteInfo | null | undefined>(undefined);
   const [accuracyM, setAccuracyM] = useState<number | undefined>(undefined);
   const [heading, setHeading] = useState<number | null>(null);
@@ -27,6 +34,8 @@ export default function NavigationPage() {
   const [recenterSeq, setRecenterSeq] = useState(0);
   const lastGpsRef = useRef<{ t: number; lat: number; lng: number } | null>(null);
   const lastAccRef = useRef<number | null>(null);
+
+  const tel = telHref(establishment?.phone ?? null);
 
   useEffect(() => {
     if (navigator.geolocation) {
@@ -235,10 +244,19 @@ export default function NavigationPage() {
                   À pied
                 </button>
               </div>
-              <Button className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold h-12 rounded-xl">
-                <Phone className="w-4 h-4 mr-2" />
-                Appeler
-              </Button>
+              {tel ? (
+                <Button asChild className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold h-12 rounded-xl">
+                  <a href={tel}>
+                    <Phone className="w-4 h-4 mr-2" />
+                    Appeler
+                  </a>
+                </Button>
+              ) : (
+                <Button disabled className="flex-1 bg-green-600 text-white font-bold h-12 rounded-xl">
+                  <Phone className="w-4 h-4 mr-2" />
+                  Appeler
+                </Button>
+              )}
               <Button
                 onClick={() => setNavActive(true)}
                 className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground font-bold h-12 rounded-xl"

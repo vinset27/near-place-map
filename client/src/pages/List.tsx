@@ -6,12 +6,18 @@ import { Search } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchEstablishmentsNearby, toUiEstablishment } from '@/lib/establishmentsApi';
 import { haversineMeters } from '@/lib/geo';
+import { ESTABLISHMENT_CATEGORIES } from '@/lib/categories';
+import { Command, CommandEmpty, CommandItem, CommandList } from '@/components/ui/command';
+import { rankEstablishmentSuggestions } from '@/lib/suggestions';
+import { useLocation } from 'wouter';
 
 export default function List() {
+  const [, setLocation] = useLocation();
   const [query, setQuery] = useState('');
   const [radiusKm, setRadiusKm] = useState<5 | 10 | 25>(10);
   const [category, setCategory] = useState('all');
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | undefined>();
+  const [openSuggest, setOpenSuggest] = useState(false);
 
   useEffect(() => {
     if (!navigator.geolocation) return;
@@ -66,14 +72,11 @@ export default function List() {
       );
   }, [dbNearby, staticEstablishments, origin, radiusKm, category, q, query]);
 
+  const ranked = useMemo(() => rankEstablishmentSuggestions(query, merged, 8), [query, merged]);
+
   const categories = [
     { id: 'all', label: 'Tous' },
-    { id: 'maquis', label: 'Maquis' },
-    { id: 'bar', label: 'Bars' },
-    { id: 'lounge', label: 'Lounges' },
-    { id: 'cave', label: 'Caves' },
-    { id: 'restaurant', label: 'Restaurants' },
-    { id: 'hotel', label: 'Hôtels' },
+    ...ESTABLISHMENT_CATEGORIES,
   ];
 
   return (
@@ -86,9 +89,47 @@ export default function List() {
             type="text" 
             placeholder="Filtrer la liste..." 
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setOpenSuggest(true);
+            }}
+            onFocus={() => setOpenSuggest(true)}
+            onBlur={() => window.setTimeout(() => setOpenSuggest(false), 140)}
             className="w-full bg-secondary/50 border-none rounded-lg py-2 pl-9 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
           />
+
+          {openSuggest && ranked.length > 0 && (
+            <div className="absolute left-0 right-0 mt-2 z-20">
+              <div className="rounded-2xl bg-background/95 backdrop-blur-xl border border-border shadow-xl overflow-hidden">
+                <Command shouldFilter={false}>
+                  <CommandList>
+                    <CommandEmpty>Aucun résultat</CommandEmpty>
+                    {ranked.map((r) => (
+                      <CommandItem
+                        key={r.id}
+                        value={r.name}
+                        onSelect={() => {
+                          setQuery(r.name);
+                          setOpenSuggest(false);
+                          setCategory('all');
+                          setLocation(`/details/${r.id}`);
+                        }}
+                        className="flex items-center gap-3"
+                      >
+                        <img src={r.imageUrl} alt={r.name} className="h-8 w-8 rounded-lg object-cover border border-border" />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-semibold truncate">{r.name}</div>
+                          <div className="text-xs text-muted-foreground truncate">
+                            {r.commune} • {r.categoryLabel}
+                          </div>
+                        </div>
+                      </CommandItem>
+                    ))}
+                  </CommandList>
+                </Command>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="mt-3 flex items-center justify-between gap-2">

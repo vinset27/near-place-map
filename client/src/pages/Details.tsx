@@ -1,11 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { useRoute, useLocation } from 'wouter';
 import { establishments } from '@/lib/data';
-import { ArrowLeft, Phone, Share2, Navigation, Clock, MapPin, Star, MessageCircle } from 'lucide-react';
+import { ArrowLeft, Phone, Share2, Navigation, MapPin, Star, MessageCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { motion } from 'framer-motion';
 import { getRoute, formatDistance, formatDuration } from '@/lib/routing';
 import { fetchEstablishmentById, toUiEstablishment } from '@/lib/establishmentsApi';
+import {
+  buildPlaceShareText,
+  googleMapsLatLngUrl,
+  openExternal,
+  smsShareHref,
+  telHref,
+  telegramShareUrl,
+  whatsappShareUrl,
+} from '@/lib/contact';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 
 export default function Details() {
   const [, params] = useRoute('/details/:id');
@@ -92,6 +102,57 @@ export default function Details() {
     );
   }
 
+  const photos = Array.isArray(establishment.photos) ? establishment.photos : [];
+  const tel = telHref(establishment.phone ?? null);
+  const mapsUrl = googleMapsLatLngUrl(establishment.coordinates.lat, establishment.coordinates.lng);
+  const shareText = buildPlaceShareText({
+    name: establishment.name,
+    address: establishment.address,
+    commune: establishment.commune,
+    lat: establishment.coordinates.lat,
+    lng: establishment.coordinates.lng,
+  });
+  const shareWhatsApp = () => openExternal(whatsappShareUrl(shareText));
+  const shareTelegram = () => openExternal(telegramShareUrl({ text: `Position: ${establishment.name}`, url: mapsUrl }));
+  const shareSms = () => {
+    window.location.href = smsShareHref(shareText);
+  };
+
+  const ShareMenu = ({ trigger }: { trigger: React.ReactNode }) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem
+          onSelect={(e) => {
+            e.preventDefault();
+            shareWhatsApp();
+          }}
+        >
+          <MessageCircle className="w-4 h-4" />
+          WhatsApp
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={(e) => {
+            e.preventDefault();
+            shareTelegram();
+          }}
+        >
+          <Share2 className="w-4 h-4" />
+          Telegram
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={(e) => {
+            e.preventDefault();
+            shareSms();
+          }}
+        >
+          <MessageCircle className="w-4 h-4" />
+          SMS
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
   return (
     <div className="min-h-screen bg-background relative pb-24">
       {/* Hero Image */}
@@ -112,9 +173,17 @@ export default function Details() {
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div className="flex space-x-2">
-            <button className="w-10 h-10 rounded-full bg-background/20 backdrop-blur-md flex items-center justify-center text-white hover:bg-background/40 transition-colors">
-              <Share2 className="w-5 h-5" />
-            </button>
+            <ShareMenu
+              trigger={
+                <button
+                  className="w-10 h-10 rounded-full bg-background/20 backdrop-blur-md flex items-center justify-center text-white hover:bg-background/40 transition-colors"
+                  aria-label="Partager"
+                  title="Partager"
+                >
+                  <Share2 className="w-5 h-5" />
+                </button>
+              }
+            />
           </div>
         </div>
 
@@ -166,12 +235,12 @@ export default function Details() {
 
       {/* Content Body */}
       <div className="px-6 py-6 space-y-6">
-        {/* Photos (if available from R2 / DB) */}
-        {Array.isArray((establishment as any).photos) && (establishment as any).photos.length > 1 && (
+        {/* Photos (from R2 / DB) */}
+        {photos.length > 0 && (
           <section>
             <h2 className="text-lg font-bold text-foreground mb-3">Photos</h2>
             <div className="grid grid-cols-3 gap-2">
-              {((establishment as any).photos as string[]).slice(0, 6).map((u) => (
+              {photos.slice(0, 6).map((u) => (
                 <a
                   key={u}
                   href={u}
@@ -251,12 +320,37 @@ export default function Details() {
 
         {/* Action Buttons */}
         <div className="fixed bottom-0 left-0 right-0 p-4 bg-background/90 backdrop-blur-xl border-t border-border flex space-x-3 z-20 pb-safe">
-           <Button className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold h-12 rounded-xl">
-             <Phone className="w-4 h-4 mr-2" />
-             Appeler
-           </Button>
+           {tel ? (
+             <Button asChild className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold h-12 rounded-xl">
+               <a href={tel}>
+                 <Phone className="w-4 h-4 mr-2" />
+                 Appeler
+               </a>
+             </Button>
+           ) : (
+             <Button disabled className="flex-1 bg-green-600 text-white font-bold h-12 rounded-xl">
+               <Phone className="w-4 h-4 mr-2" />
+               Appeler
+             </Button>
+           )}
+
+           <ShareMenu
+             trigger={
+               <Button type="button" variant="secondary" className="flex-1 font-bold h-12 rounded-xl">
+                 <Share2 className="w-4 h-4 mr-2" />
+                 Partager
+               </Button>
+             }
+           />
+
            <Button 
-             onClick={() => setLocation(`/navigation?id=${establishment.id}&mode=${travelMode}`)}
+             onClick={() =>
+               setLocation(
+                 `/navigation?id=${establishment.id}&mode=${travelMode}&slat=${encodeURIComponent(
+                   String(userLoc.lat),
+                 )}&slng=${encodeURIComponent(String(userLoc.lng))}`,
+               )
+             }
              className="flex-[2] bg-primary hover:bg-primary/90 text-primary-foreground font-bold h-12 rounded-xl"
            >
              <Navigation className="w-4 h-4 mr-2" />

@@ -267,6 +267,24 @@ export async function registerRoutes(
 
     try {
       const { lat, lng, radiusMeters, types } = parsed.data;
+      const allowed = new Set([
+        "restaurant",
+        "bar",
+        "night_club",
+        "lodging",
+        "liquor_store",
+        "pharmacy",
+        "police",
+        "hospital",
+        "fire_station",
+        "doctor",
+      ]);
+      const unknown = types.filter((t) => !allowed.has(t));
+      if (unknown.length) {
+        return res.status(400).json({
+          message: `Type(s) Google invalide(s): ${unknown.join(", ")}. Types autorisés: ${Array.from(allowed).join(", ")}`,
+        });
+      }
       const inserted: string[] = [];
       let seen = 0;
 

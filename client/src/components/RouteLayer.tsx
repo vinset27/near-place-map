@@ -31,7 +31,9 @@ export default function RouteLayer({
   const distanceToRouteMeters = (p: { lat: number; lng: number }, coords: Array<[number, number]>) => {
     if (coords.length < 2) return Infinity;
     let best = Infinity;
-    for (let i = 0; i < coords.length - 1; i += 2) {
+    // Adaptive stride: accurate for short routes, cheaper for long ones.
+    const stride = coords.length > 600 ? 3 : 1;
+    for (let i = 0; i < coords.length - 1; i += stride) {
       const a = coords[i];
       const b = coords[i + 1];
       const d = pointToSegmentMeters(p, a, b);
@@ -60,17 +62,21 @@ export default function RouteLayer({
           route && route.geometry && route.geometry.length > 1
             ? distanceToRouteMeters(start, route.geometry)
             : 0;
-        const offRouteThreshold = mode === 'walking' ? 20 : 35;
-        const rerouteCooldownMs = mode === 'walking' ? 6000 : 8000;
+        const offRouteThreshold = mode === 'walking' ? 18 : 28;
+        const rerouteCooldownMs = mode === 'walking' ? 4500 : 6000;
         const shouldRerouteForDeviation =
           offRoute > offRouteThreshold && now - lastFetchAtRef.current > rerouteCooldownMs;
 
-        const movedThreshold = mode === 'walking' ? 80 : 200;
+        // Refresh more frequently so the route stays "best" while moving (Glovo-like),
+        // without hammering the API.
+        const movedThreshold = mode === 'walking' ? 45 : 120;
+        const minRefreshMs = mode === 'walking' ? 2500 : 3500;
 
         if (!destChanged && !shouldRerouteForDeviation && moved < movedThreshold) {
           // No reroute needed; don't set state on every GPS tick.
           return;
         }
+        if (!destChanged && !shouldRerouteForDeviation && now - lastFetchAtRef.current < minRefreshMs) return;
       }
 
       setLoading(true);

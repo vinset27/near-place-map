@@ -1,27 +1,14 @@
 import { Establishment } from '@/lib/data';
-import { Star, MapPin, Hotel, UtensilsCrossed, Wine, Martini } from 'lucide-react';
+import { Star, MapPin } from 'lucide-react';
 import { Link } from 'wouter';
+import { getCategoryIcon } from '@/lib/categories';
 
 interface EstablishmentCardProps {
   establishment: Establishment;
 }
 
 export default function EstablishmentCard({ establishment }: EstablishmentCardProps) {
-  const CategoryGlyph = (() => {
-    switch (establishment.category) {
-      case "restaurant":
-      case "maquis":
-        return UtensilsCrossed;
-      case "bar":
-        return Martini;
-      case "cave":
-        return Wine;
-      case "hotel":
-        return Hotel;
-      default:
-        return MapPin;
-    }
-  })();
+  const CategoryGlyph = getCategoryIcon(establishment.category);
 
   return (
     <Link href={`/details/${establishment.id}`}>

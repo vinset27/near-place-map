@@ -11,6 +11,7 @@ import { useQuery } from '@tanstack/react-query';
 export default function Home() {
   const [activeFilter, setActiveFilter] = useState('all');
   const [query, setQuery] = useState('');
+  const [highlightedId, setHighlightedId] = useState<string | undefined>(undefined);
   // Default wider radius so Cocody/Angré shows up immediately for most users.
   const [radiusKm, setRadiusKm] = useState<5 | 10 | 25>(25);
   const [showEvents, setShowEvents] = useState(false);
@@ -97,6 +98,7 @@ export default function Home() {
           userLocation={userLocation}
           establishmentsData={merged}
           events={events}
+          highlightedId={highlightedId}
         />
         <FilterBar
           activeFilter={activeFilter}
@@ -107,6 +109,11 @@ export default function Home() {
           onRadiusKmChange={setRadiusKm}
           showEvents={showEvents}
           onShowEventsChange={setShowEvents}
+          suggestions={merged}
+          onSuggestionSelect={(id) => {
+            setActiveFilter('all');
+            setHighlightedId(id);
+          }}
         />
 
         {merged.length === 0 && (

@@ -10,6 +10,7 @@ import { apiRequest } from '@/lib/queryClient';
 import { createEstablishment } from '@/lib/establishmentsApi';
 import LocationPickerDialog from '@/components/LocationPickerDialog';
 import { queryClient } from '@/lib/queryClient';
+import { ESTABLISHMENT_CATEGORIES } from '@/lib/categories';
 
 export default function Business() {
   const [, setLocation] = useLocation();
@@ -207,11 +208,11 @@ export default function Business() {
                   onChange={(e) => setCategory(e.target.value)}
                   className="flex h-10 w-full rounded-md border border-border bg-secondary px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background"
                 >
-                  <option value="maquis">Maquis</option>
-                  <option value="bar">Bar</option>
-                  <option value="lounge">Lounge</option>
-                  <option value="cave">Cave</option>
-                  <option value="restaurant">Restaurant</option>
+                  {ESTABLISHMENT_CATEGORIES.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.label}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -400,6 +401,26 @@ export default function Business() {
                 Publié sur la carte ✅ (id: {publishedId})
               </p>
             )}
+
+            {photoUrls.length > 0 && (
+              <div className="w-full max-w-sm mb-6">
+                <p className="text-sm font-semibold text-foreground mb-2">Photos jointes</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {photoUrls.slice(0, 6).map((u) => (
+                    <a
+                      key={u}
+                      href={u}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block overflow-hidden rounded-lg border border-border"
+                    >
+                      <img src={u} alt={name} className="h-20 w-full object-cover" loading="lazy" />
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <Button onClick={() => setLocation('/app')} variant="outline" className="w-full border-border text-foreground hover:bg-secondary">
               Retour à l'accueil
             </Button>

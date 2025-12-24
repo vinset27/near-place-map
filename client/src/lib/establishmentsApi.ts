@@ -1,6 +1,5 @@
 import type { Establishment } from "@/lib/data";
-import loungeImage from "@assets/generated_images/modern_lounge_bar_interior.png";
-import maquisImage from "@assets/generated_images/lively_maquis_in_abidjan_at_night.png";
+import { placeholderImageDataUrl } from "@/lib/placeImages";
 
 export type ApiEstablishment = {
   id: string;
@@ -27,10 +26,12 @@ export function toUiEstablishment(e: ApiEstablishment): Establishment {
     description: e.description || "Nouveau lieu ajouté sur la carte.",
     address: e.address || "",
     commune: (e.commune || "Plateau") as any,
+    phone: e.phone ?? null,
     coordinates: { lat: e.lat, lng: e.lng },
     rating: 4.5,
     isOpen: true,
-    imageUrl: photo0 || (category === "maquis" ? maquisImage : loungeImage),
+    // Always prioritize uploaded photos (R2/DB). If missing, use a unique deterministic placeholder.
+    imageUrl: photo0 || placeholderImageDataUrl({ id: e.id, name: e.name, category }),
     features: [],
     photos: Array.isArray(e.photos) ? e.photos : undefined,
   };

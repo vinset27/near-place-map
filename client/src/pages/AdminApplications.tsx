@@ -46,13 +46,17 @@ export default function AdminApplications() {
 
   const [importLat, setImportLat] = useState<string>("5.3261");
   const [importLng, setImportLng] = useState<string>("-4.0200");
-  const [importRadius, setImportRadius] = useState<number>(3000);
+  const [importRadius, setImportRadius] = useState<number>(8000);
   const [importTypes, setImportTypes] = useState<Record<string, boolean>>({
     restaurant: true,
     bar: true,
     night_club: true,
     lodging: true,
     liquor_store: true,
+    pharmacy: true,
+    police: true,
+    hospital: true,
+    fire_station: false,
   });
 
   const fillAngre = () => {
@@ -172,13 +176,19 @@ export default function AdminApplications() {
     // Coverage points (Abidjan) — you can tweak later.
     const centers = [
       { name: "Plateau", lat: 5.3236, lng: -4.0267 },
+      { name: "Adjamé", lat: 5.3552, lng: -4.0236 },
       { name: "Cocody", lat: 5.3600, lng: -3.9900 },
-      { name: "Marcory", lat: 5.2950, lng: -3.9980 },
-      { name: "Yopougon", lat: 5.3300, lng: -4.0800 },
-      { name: "Treichville", lat: 5.2936, lng: -4.0190 },
-      { name: "Riviera", lat: 5.3790, lng: -3.9800 },
       { name: "Deux Plateaux", lat: 5.3550, lng: -4.0050 },
+      { name: "Riviera", lat: 5.3790, lng: -3.9800 },
       { name: "Cocody Angré", lat: 5.3950, lng: -3.9650 },
+      { name: "Treichville", lat: 5.2936, lng: -4.0190 },
+      { name: "Marcory", lat: 5.2950, lng: -3.9980 },
+      { name: "Koumassi", lat: 5.2892, lng: -3.9588 },
+      { name: "Port-Bouët", lat: 5.2568, lng: -3.9009 },
+      { name: "Yopougon", lat: 5.3300, lng: -4.0800 },
+      { name: "Abobo", lat: 5.4169, lng: -4.0186 },
+      { name: "Anyama", lat: 5.4948, lng: -4.0512 },
+      { name: "Bingerville", lat: 5.3556, lng: -3.8833 },
     ];
 
     const types = Object.entries(importTypes)

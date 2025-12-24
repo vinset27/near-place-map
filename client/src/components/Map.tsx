@@ -10,7 +10,7 @@ import Map, {
   Layer,
 } from 'react-map-gl';
 import { establishments as defaultEstablishments, type Establishment } from '@/lib/data';
-import { CalendarClock, Hotel, MapPin, Navigation, UtensilsCrossed, Wine, Martini } from 'lucide-react';
+import { CalendarClock, Navigation } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useLocation } from 'wouter';
 import RouteLayer from './RouteLayer';
@@ -19,6 +19,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import { type EstablishmentEvent } from '@/lib/events';
 import { haversineMeters } from '@/lib/geo';
 import { MAPBOX_TOKEN } from '@/lib/mapbox';
+import { getCategoryIcon } from '@/lib/categories';
 
 interface MapViewProps {
   interactive?: boolean;
@@ -50,6 +51,7 @@ export default function MapView({
   const mapRef = useRef<MapRef | null>(null);
   const lastFollowRef = useRef<{ t: number; lat: number; lng: number; bearing: number } | null>(null);
   const lastUserGestureRef = useRef<number>(0);
+  const lastFitKeyRef = useRef<string | null>(null);
   const routeProgressRef = useRef<{
     coords: Array<[number, number]>;
     cum: number[];
@@ -135,6 +137,8 @@ export default function MapView({
       setRouteInfo(undefined);
       setHasCenteredOnUser(true); // user is interacting with POIs
     }
+    // Fit route once per selection/mode; avoid "jumping" the camera on every reroute tick.
+    lastFitKeyRef.current = null;
   }, [selectedId]);
 
   // Center on the user's actual location the first time we get it (Home screen UX)
@@ -259,16 +263,19 @@ export default function MapView({
     if (!routeBounds) return;
     const map = mapRef.current;
     if (!map) return;
+    const fitKey = `${selectedId ?? ""}:${routeMode}`;
+    if (lastFitKeyRef.current === fitKey) return;
 
     try {
       map.fitBounds(routeBounds, {
         padding: 80,
         duration: 600,
       });
+      lastFitKeyRef.current = fitKey;
     } catch {
       // ignore fitBounds errors (e.g. map not fully ready)
     }
-  }, [routeBounds, followUser]);
+  }, [routeBounds, followUser, selectedId, routeMode]);
 
   // Allow parent pages (e.g. /navigation) to display distance/duration and errors
   useEffect(() => {
@@ -401,7 +408,7 @@ export default function MapView({
             setHasCenteredOnUser(true);
           }
         }}
-        interactiveLayerIds={["clusters", "unclustered-point"]}
+        interactiveLayerIds={["clusters", "unclustered-point", "unclustered-icon"]}
         style={{ width: '100%', height: '100%' }}
         mapStyle={mapStyle}
         mapboxAccessToken={MAPBOX_TOKEN}
@@ -525,6 +532,18 @@ export default function MapView({
                 "#fb7185",
                 "hotel",
                 "#64748b",
+                "pharmacy",
+                "#06b6d4",
+                "police",
+                "#f59e0b",
+                "hospital",
+                "#ef4444",
+                "emergency",
+                "#dc2626",
+                "organizer",
+                "#6366f1",
+                "other",
+                "#94a3b8",
                 /* default */ "#3b82f6",
               ],
               "circle-radius": [
@@ -543,6 +562,44 @@ export default function MapView({
               "circle-stroke-color": "#ffffff",
             }}
           />
+          <Layer
+            id="unclustered-icon"
+            type="symbol"
+            filter={["!", ["has", "point_count"]]}
+            layout={{
+              // Use Mapbox sprite icons (more stable than emoji text rendering on some devices/bundles).
+              "icon-image": [
+                "match",
+                ["get", "category"],
+                "restaurant",
+                "restaurant-15",
+                "maquis",
+                "restaurant-15",
+                "bar",
+                "bar-15",
+                "lounge",
+                "music-15",
+                "cave",
+                "alcohol-shop-15",
+                "hotel",
+                "lodging-15",
+                "pharmacy",
+                "pharmacy-15",
+                "police",
+                "police-15",
+                "hospital",
+                "hospital-15",
+                "emergency",
+                "fire-station-15",
+                "organizer",
+                "theatre-15",
+                /* default */ "marker-15",
+              ],
+              "icon-size": 1,
+              "icon-allow-overlap": true,
+              "icon-ignore-placement": true,
+            }}
+          />
         </Source>
 
         {/* Legend */}
@@ -555,7 +612,12 @@ export default function MapView({
               <LegendRow color="bg-blue-500" label="Bar" />
               <LegendRow color="bg-emerald-500" label="Cave" />
               <LegendRow color="bg-rose-500" label="Restaurant" />
-                <LegendRow color="bg-slate-500" label="Hôtel" />
+              <LegendRow color="bg-slate-500" label="Hôtel" />
+              <LegendRow color="bg-cyan-500" label="Pharmacie" />
+              <LegendRow color="bg-amber-500" label="Police" />
+              <LegendRow color="bg-red-500" label="Hôpital / Clinique" />
+              <LegendRow color="bg-red-600" label="Secours" />
+              <LegendRow color="bg-indigo-500" label="Viganisateur" />
             </div>
           </div>
 
@@ -577,6 +639,11 @@ export default function MapView({
                 <LegendRow color="bg-emerald-500" label="Cave" />
                 <LegendRow color="bg-rose-500" label="Restaurant" />
                 <LegendRow color="bg-slate-500" label="Hôtel" />
+                <LegendRow color="bg-cyan-500" label="Pharmacie" />
+                <LegendRow color="bg-amber-500" label="Police" />
+                <LegendRow color="bg-red-500" label="Hôpital / Clinique" />
+                <LegendRow color="bg-red-600" label="Secours" />
+                <LegendRow color="bg-indigo-500" label="Viganisateur" />
               </div>
             )}
           </div>
@@ -704,20 +771,8 @@ function LegendRow({ color, label }: { color: string; label: string }) {
 
 function CategoryIcon({ category }: { category: Establishment["category"] }) {
   const cls = "w-5 h-5 text-white";
-  switch (category) {
-    case "restaurant":
-    case "maquis":
-      return <UtensilsCrossed className={cls} />;
-    case "bar":
-      return <Martini className={cls} />;
-    case "cave":
-      return <Wine className={cls} />;
-    case "hotel":
-      return <Hotel className={cls} />;
-    case "lounge":
-    default:
-      return <MapPin className={cls} />;
-  }
+  const Icon = getCategoryIcon(category);
+  return <Icon className={cls} />;
 }
 
 // Project user point onto a polyline segment in meters using a local equirectangular approximation.
