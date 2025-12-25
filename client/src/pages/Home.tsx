@@ -61,7 +61,7 @@ export default function Home() {
         haversineMeters(origin, a.coordinates) - haversineMeters(origin, b.coordinates),
     );
 
-  const { data: dbNearby } = useQuery({
+  const { data: dbNearby, error: dbError } = useQuery({
     queryKey: ['db-establishments', origin.lat, origin.lng, radiusKm, activeFilter, q],
     enabled: Number.isFinite(origin.lat) && Number.isFinite(origin.lng),
     queryFn: async () =>
@@ -115,6 +115,21 @@ export default function Home() {
             setHighlightedId(id);
           }}
         />
+
+        {dbError && (
+          <div className="absolute left-0 right-0 bottom-44 px-4 z-10 pointer-events-none">
+            <div className="mx-auto max-w-md rounded-2xl bg-amber-50/90 backdrop-blur-xl border border-amber-200 p-4 text-center">
+              <div className="text-sm font-semibold text-amber-900">Chargement des lieux (DB) impossible</div>
+              <div className="mt-1 text-xs text-amber-900/80 break-words">
+                {String((dbError as any)?.message || dbError)}
+              </div>
+              <div className="mt-2 text-xs text-amber-900/70">
+                Si ton front est sur un autre domaine que l’API: vérifie <code>VITE_API_BASE_URL</code> (au build) et{" "}
+                <code>CORS_ORIGINS</code> (côté backend).
+              </div>
+            </div>
+          </div>
+        )}
 
         {merged.length === 0 && (
           <div className="absolute left-0 right-0 bottom-24 px-4 z-10 pointer-events-none">

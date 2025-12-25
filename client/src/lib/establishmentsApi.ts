@@ -65,14 +65,16 @@ export async function fetchEstablishmentsNearby(params: {
   if (params.category) sp.set("category", params.category);
   if (params.q) sp.set("q", params.q);
 
-  const res = await fetch(apiUrl(`/api/establishments?${sp.toString()}`), { credentials: "include" });
+  // Public endpoint: do not send cookies/credentials (simplifies CORS for split-origin deployments).
+  const res = await fetch(apiUrl(`/api/establishments?${sp.toString()}`));
   if (!res.ok) throw new Error(await res.text());
   const data = await res.json();
   return (data?.establishments || []) as ApiEstablishment[];
 }
 
 export async function fetchEstablishmentById(id: string): Promise<ApiEstablishment | null> {
-  const res = await fetch(apiUrl(`/api/establishments/${encodeURIComponent(id)}`), { credentials: "include" });
+  // Public endpoint: do not send cookies/credentials (simplifies CORS for split-origin deployments).
+  const res = await fetch(apiUrl(`/api/establishments/${encodeURIComponent(id)}`));
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(await res.text());
   const data = await res.json();

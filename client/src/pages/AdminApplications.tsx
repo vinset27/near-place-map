@@ -74,9 +74,8 @@ export default function AdminApplications() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/admin/business/applications?status=${status}`, {
+      const res = await fetch(apiUrl(`/api/admin/business/applications?status=${status}`), {
         headers: { "x-admin-token": token.trim() },
-        credentials: "include",
       });
       const text = await res.text();
       if (!res.ok) throw new Error(text);
@@ -145,7 +144,6 @@ export default function AdminApplications() {
       const res = await fetch(apiUrl("/api/admin/import/google/nearby"), {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-admin-token": token.trim() },
-        credentials: "include",
         body: JSON.stringify({
           lat,
           lng,
@@ -203,7 +201,6 @@ export default function AdminApplications() {
         const res = await fetch(apiUrl("/api/admin/import/google/nearby"), {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-admin-token": token.trim() },
-          credentials: "include",
           body: JSON.stringify({
             lat: c.lat,
             lng: c.lng,
@@ -245,10 +242,9 @@ export default function AdminApplications() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/admin/business/applications/${encodeURIComponent(id)}/approve`, {
+      const res = await fetch(apiUrl(`/api/admin/business/applications/${encodeURIComponent(id)}/approve`), {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-admin-token": token.trim() },
-        credentials: "include",
         body: JSON.stringify({
           lat,
           lng,

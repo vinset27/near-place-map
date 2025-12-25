@@ -34,7 +34,7 @@ export default function List() {
   const origin = userLocation ?? { lat: 5.3261, lng: -4.02 };
   const q = query.trim().toLowerCase();
 
-  const { data: dbNearby } = useQuery({
+  const { data: dbNearby, error: dbError } = useQuery({
     queryKey: ['list-establishments', origin.lat, origin.lng, radiusKm, category, q],
     enabled: Number.isFinite(origin.lat) && Number.isFinite(origin.lng),
     queryFn: async () =>
@@ -84,6 +84,12 @@ export default function List() {
     <div className="min-h-screen bg-background pb-20">
       <div className="sticky top-0 z-10 bg-background/80 backdrop-blur-lg border-b border-border px-4 py-4">
         <h1 className="text-2xl font-display font-bold text-foreground mb-2">À proximité</h1>
+        {dbError && (
+          <div className="mb-3 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900">
+            <div className="font-semibold">DB/API indisponible</div>
+            <div className="break-words">{String((dbError as any)?.message || dbError)}</div>
+          </div>
+        )}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <input 
