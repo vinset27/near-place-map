@@ -6,6 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ArrowLeft, CheckCircle2, LocateFixed, MapPin, RefreshCw } from "lucide-react";
 import { useLocation } from "wouter";
 import LocationPickerDialog from "@/components/LocationPickerDialog";
+import { apiUrl } from "@/lib/apiBase";
 
 type Application = {
   id: string;
@@ -141,7 +142,7 @@ export default function AdminApplications() {
     setError(null);
     setImportMsg(null);
     try {
-      const res = await fetch("/api/admin/import/google/nearby", {
+      const res = await fetch(apiUrl("/api/admin/import/google/nearby"), {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-admin-token": token.trim() },
         credentials: "include",
@@ -199,7 +200,7 @@ export default function AdminApplications() {
       for (let i = 0; i < centers.length; i++) {
         const c = centers[i];
         setBatchLog((prev) => [...prev, `Import ${c.name}…`]);
-        const res = await fetch("/api/admin/import/google/nearby", {
+        const res = await fetch(apiUrl("/api/admin/import/google/nearby"), {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-admin-token": token.trim() },
           credentials: "include",

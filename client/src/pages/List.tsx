@@ -36,6 +36,7 @@ export default function List() {
 
   const { data: dbNearby } = useQuery({
     queryKey: ['list-establishments', origin.lat, origin.lng, radiusKm, category, q],
+    enabled: Number.isFinite(origin.lat) && Number.isFinite(origin.lng),
     queryFn: async () =>
       fetchEstablishmentsNearby({
         lat: origin.lat,

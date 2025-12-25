@@ -7,6 +7,11 @@ import { createServer } from "http";
 const app = express();
 const httpServer = createServer(app);
 
+// Needed in production behind reverse proxies (Render) so secure cookies work correctly.
+if (process.env.NODE_ENV === "production") {
+  app.set("trust proxy", 1);
+}
+
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
@@ -22,6 +27,69 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
+
+// CORS for split-origin deployments (e.g. Cloudflare Pages frontend -> Render backend)
+// Configure with CORS_ORIGINS="https://your.pages.dev,https://your-custom-domain"
+// Supports wildcard subdomains via "*." prefix, e.g.:
+//   CORS_ORIGINS=https://near-place-map.pages.dev,https://*.near-place-map.pages.dev
+const allowedOrigins = String(process.env.CORS_ORIGINS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+function originAllowed(origin: string): { allow: boolean; allowCredentials: boolean } {
+  if (!origin) return { allow: false, allowCredentials: false };
+  if (allowedOrigins.length === 0) return { allow: false, allowCredentials: false };
+
+  // Special case: "*" allows all origins but cannot be used with credentials.
+  if (allowedOrigins.includes("*")) return { allow: true, allowCredentials: false };
+
+  try {
+    const o = new URL(origin);
+    for (const pattern of allowedOrigins) {
+      // Exact origin match (recommended)
+      if (pattern === origin) return { allow: true, allowCredentials: true };
+
+      // Wildcard host match: https://*.example.com
+      if (pattern.includes("*")) {
+        const p = new URL(pattern.replace("*.", "wildcard."));
+        if (p.protocol !== o.protocol) continue;
+        if (p.port && p.port !== o.port) continue;
+        const suffix = p.hostname.replace(/^wildcard\./, "");
+        if (o.hostname === suffix || o.hostname.endsWith(`.${suffix}`)) {
+          return { allow: true, allowCredentials: true };
+        }
+      }
+    }
+  } catch {
+    // ignore invalid origins/patterns
+  }
+
+  return { allow: false, allowCredentials: false };
+}
+
+app.use((req, res, next) => {
+  const origin = String(req.headers.origin || "").trim();
+  if (origin && allowedOrigins.length > 0) {
+    const decision = originAllowed(origin);
+    if (decision.allow) {
+      res.setHeader("Access-Control-Allow-Origin", decision.allowCredentials ? origin : "*");
+      if (decision.allowCredentials) res.setHeader("Access-Control-Allow-Credentials", "true");
+    }
+    res.setHeader("Vary", "Origin");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization, X-Admin-Token, x-admin-token",
+    );
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+  }
+
+  if (req.method === "OPTIONS") {
+    res.status(204).end();
+    return;
+  }
+  next();
+});
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {

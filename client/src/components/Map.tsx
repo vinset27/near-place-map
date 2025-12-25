@@ -251,7 +251,9 @@ export default function MapView({
         // v11 tends to be more stable across bundlers than v12 (globe/fog).
         return "mapbox://styles/mapbox/satellite-streets-v11";
       }
-      return isDark ? "mapbox://styles/mapbox/navigation-night-v1" : "mapbox://styles/mapbox/navigation-day-v1";
+      // NOTE: Mapbox "navigation-*" styles can reference the Incidents tileset on some plans,
+      // which produces noisy 404s (mapbox-incidents-v1) in the console. Use a style without it.
+      return isDark ? "mapbox://styles/mapbox/dark-v11" : "mapbox://styles/mapbox/streets-v12";
     }
 
     return isDark ? "mapbox://styles/mapbox/dark-v11" : "mapbox://styles/mapbox/light-v11";

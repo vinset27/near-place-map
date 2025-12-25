@@ -96,7 +96,9 @@ export async function registerRoutes(
       saveUninitialized: false,
       cookie: {
         httpOnly: true,
-        sameSite: "lax",
+        // When frontend and backend are on different origins (Cloudflare Pages + Render),
+        // cookies must be sent cross-site => SameSite=None; Secure is required.
+        sameSite: isProd ? "none" : "lax",
         secure: isProd,
         maxAge: 1000 * 60 * 60 * 24 * 14,
       },
@@ -349,7 +351,10 @@ export async function registerRoutes(
     // Client can still request lower via `limit`.
     const limit = Math.min(5000, Math.max(1, Number(req.query.limit || 1500)));
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      return res.status(400).json({ message: "lat/lng are required" });
+      return res.status(400).json({
+        message:
+          "lat/lng are required. Example: /api/establishments?lat=5.3261&lng=-4.0200&radiusKm=10&category=all",
+      });
     }
 
     // Very small TTL cache to avoid hammering DB during map drags / quick filter toggles.
