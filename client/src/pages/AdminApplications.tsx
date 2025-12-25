@@ -58,6 +58,7 @@ export default function AdminApplications() {
     police: true,
     hospital: true,
     fire_station: false,
+    doctor: false,
   });
 
   const fillAngre = () => {

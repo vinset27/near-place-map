@@ -2,6 +2,7 @@ import { Establishment } from '@/lib/data';
 import { Star, MapPin } from 'lucide-react';
 import { Link } from 'wouter';
 import { getCategoryIcon } from '@/lib/categories';
+import { formatDistance } from '@/lib/routing';
 
 interface EstablishmentCardProps {
   establishment: Establishment;
@@ -41,8 +42,17 @@ export default function EstablishmentCard({ establishment }: EstablishmentCardPr
           
           <div className="flex items-center text-muted-foreground text-xs mb-2">
             <MapPin className="w-3 h-3 mr-1" />
-            <span className="truncate">{establishment.commune} • {establishment.address}</span>
+            <span className="truncate">
+              {establishment.commune ? `${establishment.commune} • ` : ""}
+              {establishment.address}
+            </span>
           </div>
+
+          {typeof establishment.distanceMeters === "number" && Number.isFinite(establishment.distanceMeters) && (
+            <div className="text-xs font-semibold text-primary">
+              À {formatDistance(establishment.distanceMeters)}
+            </div>
+          )}
           
           <div className="flex flex-wrap gap-1 mt-2">
             {establishment.features.slice(0, 2).map((feature, i) => (

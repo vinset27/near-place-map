@@ -14,7 +14,7 @@ import { CalendarClock, Navigation } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useLocation } from 'wouter';
 import RouteLayer from './RouteLayer';
-import { RouteInfo } from '@/lib/routing';
+import { RouteInfo, formatDistance, formatDuration } from '@/lib/routing';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { type EstablishmentEvent } from '@/lib/events';
 import { haversineMeters } from '@/lib/geo';
@@ -32,7 +32,9 @@ interface MapViewProps {
   events?: Array<EstablishmentEvent & { establishment: Establishment }>;
   navMapStyle?: 'navigation' | 'satellite';
   recenterSeq?: number;
-  routeMode?: 'driving' | 'walking';
+  routeMode?: 'driving' | 'walking' | 'cycling';
+  // Allow parent pages (e.g. /navigation) to hide the route when user stops navigation.
+  routeEnabled?: boolean;
 }
 
 export default function MapView({
@@ -47,6 +49,7 @@ export default function MapView({
   navMapStyle = 'navigation',
   recenterSeq = 0,
   routeMode = 'driving',
+  routeEnabled = true,
 }: MapViewProps) {
   const mapRef = useRef<MapRef | null>(null);
   const lastFollowRef = useRef<{ t: number; lat: number; lng: number; bearing: number } | null>(null);
@@ -251,9 +254,7 @@ export default function MapView({
         // v11 tends to be more stable across bundlers than v12 (globe/fog).
         return "mapbox://styles/mapbox/satellite-streets-v11";
       }
-      // NOTE: Mapbox "navigation-*" styles can reference the Incidents tileset on some plans,
-      // which produces noisy 404s (mapbox-incidents-v1) in the console. Use a style without it.
-      return isDark ? "mapbox://styles/mapbox/dark-v11" : "mapbox://styles/mapbox/streets-v12";
+      return isDark ? "mapbox://styles/mapbox/dark-v11" : "mapbox://styles/mapbox/light-v11";
     }
 
     return isDark ? "mapbox://styles/mapbox/dark-v11" : "mapbox://styles/mapbox/light-v11";
@@ -365,9 +366,9 @@ export default function MapView({
       ...prev,
       latitude: userLocation.lat,
       longitude: userLocation.lng,
-      zoom: Math.max(prev.zoom, routeMode === 'walking' ? 17.2 : 16.5),
+      zoom: Math.max(prev.zoom, routeMode === 'walking' ? 17.2 : routeMode === 'cycling' ? 16.9 : 16.5),
       bearing: userHeading ?? prev.bearing,
-      pitch: Math.max(prev.pitch, routeMode === 'walking' ? 55 : 60),
+      pitch: Math.max(prev.pitch, routeMode === 'walking' ? 55 : routeMode === 'cycling' ? 58 : 60),
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recenterSeq, routeMode]);
@@ -410,7 +411,7 @@ export default function MapView({
             setHasCenteredOnUser(true);
           }
         }}
-        interactiveLayerIds={["clusters", "unclustered-point", "unclustered-icon"]}
+        interactiveLayerIds={["clusters", "unclustered-point"]}
         style={{ width: '100%', height: '100%' }}
         mapStyle={mapStyle}
         mapboxAccessToken={MAPBOX_TOKEN}
@@ -564,44 +565,6 @@ export default function MapView({
               "circle-stroke-color": "#ffffff",
             }}
           />
-          <Layer
-            id="unclustered-icon"
-            type="symbol"
-            filter={["!", ["has", "point_count"]]}
-            layout={{
-              // Use Mapbox sprite icons (more stable than emoji text rendering on some devices/bundles).
-              "icon-image": [
-                "match",
-                ["get", "category"],
-                "restaurant",
-                "restaurant-15",
-                "maquis",
-                "restaurant-15",
-                "bar",
-                "bar-15",
-                "lounge",
-                "music-15",
-                "cave",
-                "alcohol-shop-15",
-                "hotel",
-                "lodging-15",
-                "pharmacy",
-                "pharmacy-15",
-                "police",
-                "police-15",
-                "hospital",
-                "hospital-15",
-                "emergency",
-                "fire-station-15",
-                "organizer",
-                "theatre-15",
-                /* default */ "marker-15",
-              ],
-              "icon-size": 1,
-              "icon-allow-overlap": true,
-              "icon-ignore-placement": true,
-            }}
-          />
         </Source>
 
         {/* Legend */}
@@ -651,8 +614,8 @@ export default function MapView({
           </div>
         </div>
 
-        {/* Route Layer - Only shows if establishment is selected */}
-        {selectedEstablishment && (
+        {/* Route Layer - Only shows if enabled + establishment is selected */}
+        {routeEnabled && selectedEstablishment && (
           <RouteLayer
             userLat={userLoc.lat}
             userLng={userLoc.lng}
@@ -717,13 +680,20 @@ export default function MapView({
                   />
                 </div>
                 <h3 className="font-display font-bold text-lg text-slate-900">{selectedEstablishment.name}</h3>
-                <p className="text-sm text-slate-600 capitalize mb-2">{selectedEstablishment.category} • {selectedEstablishment.commune}</p>
+                <p className="text-sm text-slate-600 capitalize mb-2">
+                  {selectedEstablishment.category}
+                  {selectedEstablishment.commune ? ` • ${selectedEstablishment.commune}` : ""}
+                </p>
+
+                <div className="bg-slate-50 rounded-lg p-2 mb-2 text-xs text-slate-700">
+                  À {formatDistance(haversineMeters(userLoc, selectedEstablishment.coordinates))}
+                </div>
                 
                 {routeInfo && (
                   <div className="bg-blue-50 rounded-lg p-2 mb-2 text-xs space-y-1">
                     <div className="flex justify-between text-blue-900 font-medium">
-                      <span>{(routeInfo.distance / 1000).toFixed(1)} km</span>
-                      <span>{Math.round(routeInfo.duration / 60)} min</span>
+                      <span>{formatDistance(routeInfo.distance)}</span>
+                      <span>{formatDuration(routeInfo.duration)}</span>
                     </div>
                   </div>
                 )}

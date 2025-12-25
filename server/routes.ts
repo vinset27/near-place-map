@@ -3,6 +3,7 @@ import type { Server } from "http";
 import { storage } from "./storage";
 import session from "express-session";
 import MemoryStoreFactory from "memorystore";
+import crypto from "crypto";
 import {
   businessApplications,
   businessApplySchema,
@@ -14,14 +15,32 @@ import {
 } from "@shared/schema";
 import { hashPassword, verifyPassword } from "./auth";
 import { db, ensureAppTables } from "./db";
-import { and, desc, eq, gte, lte } from "drizzle-orm";
+import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { presignBusinessPhotoPut } from "./r2";
 import { googlePlacesNearbyAll, mapGoogleTypesToCategory } from "./googlePlaces";
 
-type EstablishmentsCacheEntry = { at: number; body: any };
+type EstablishmentsCacheEntry = { at: number; body: any; etag: string };
 const EST_CACHE_TTL_MS = 10_000;
 const establishmentsCache = new Map<string, EstablishmentsCacheEntry>();
+
+function computeWeakEtag(obj: unknown): string {
+  // Stable enough for short-lived caching of public JSON responses.
+  const json = JSON.stringify(obj);
+  const hash = crypto.createHash("sha1").update(json).digest("base64");
+  return `W/"${hash}"`;
+}
+
+function setPublicApiCacheHeaders(res: any, etag?: string, hit?: boolean, extra?: Record<string, string>) {
+  // These endpoints are public (no user-specific data). If you're behind Cloudflare proxy,
+  // `s-maxage` enables edge caching. Keep TTL short to avoid staleness after imports.
+  res.setHeader("Cache-Control", "public, max-age=10, s-maxage=30, stale-while-revalidate=60");
+  if (etag) res.setHeader("ETag", etag);
+  if (typeof hit === "boolean") res.setHeader("X-Cache", hit ? "HIT" : "MISS");
+  if (extra) {
+    for (const [k, v] of Object.entries(extra)) res.setHeader(k, v);
+  }
+}
 
 declare module "express-session" {
   interface SessionData {
@@ -74,6 +93,36 @@ function haversineMeters(a: { lat: number; lng: number }, b: { lat: number; lng:
   const sin2 = Math.sin(dLng / 2);
   const h = sin1 * sin1 + Math.cos(lat1) * Math.cos(lat2) * sin2 * sin2;
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+function inferCommuneFromAddress(address: string | null | undefined): string | null {
+  const a = String(address || "").toLowerCase();
+  if (!a) return null;
+  // Quick heuristic for Abidjan communes (best-effort; avoids showing wrong "Plateau" everywhere).
+  const rules: Array<[string, string]> = [
+    ["cocody", "Cocody"],
+    ["angré", "Cocody"],
+    ["angre", "Cocody"],
+    ["riviera", "Cocody"],
+    ["deux plateaux", "Cocody"],
+    ["2 plateaux", "Cocody"],
+    ["plateau", "Plateau"],
+    ["treichville", "Treichville"],
+    ["marcory", "Marcory"],
+    ["koumassi", "Koumassi"],
+    ["port-bouët", "Port-Bouët"],
+    ["port bouet", "Port-Bouët"],
+    ["yopougon", "Yopougon"],
+    ["abobo", "Abobo"],
+    ["adjame", "Adjamé"],
+    ["adjamé", "Adjamé"],
+    ["anyama", "Anyama"],
+    ["bingerville", "Bingerville"],
+  ];
+  for (const [needle, label] of rules) {
+    if (a.includes(needle)) return label;
+  }
+  return null;
 }
 
 export async function registerRoutes(
@@ -249,6 +298,8 @@ export async function registerRoutes(
 
     await db.update(businessApplications).set({ status: "approved" }).where(eq(businessApplications.id, appRow.id));
 
+    // New/updated place => invalidate nearby caches quickly.
+    establishmentsCache.clear();
     return res.json({ application: { ...appRow, status: "approved" }, establishment: estRows[0] });
   });
 
@@ -298,6 +349,7 @@ export async function registerRoutes(
 
           const category = mapGoogleTypesToCategory(r.types);
           const address = r.vicinity || null;
+          const commune = inferCommuneFromAddress(address);
 
           const rows = await db
             .insert(establishments)
@@ -305,7 +357,7 @@ export async function registerRoutes(
               name: r.name,
               category,
               address,
-              commune: null,
+              commune,
               phone: null,
               description: null,
               lat: r.geometry.location.lat,
@@ -332,6 +384,8 @@ export async function registerRoutes(
         }
       }
 
+      // Imported/updated places => invalidate nearby caches quickly.
+      establishmentsCache.clear();
       return res.json({ ok: true, scanned: seen, upserted: inserted.length, ids: inserted.slice(0, 50) });
     } catch (e: any) {
       const msg = e?.message || "Google import failed";
@@ -344,7 +398,7 @@ export async function registerRoutes(
     if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
     const lat = Number(req.query.lat);
     const lng = Number(req.query.lng);
-    const radiusKm = Math.min(50, Math.max(1, Number(req.query.radiusKm || 10)));
+    const radiusKm = Math.min(250, Math.max(1, Number(req.query.radiusKm || 10)));
     const category = req.query.category ? String(req.query.category) : "all";
     const q = req.query.q ? String(req.query.q).trim() : "";
     // Default higher because Abidjan imports can easily exceed 200 within 10-25km.
@@ -369,8 +423,9 @@ export async function registerRoutes(
     ].join("|");
     const cached = establishmentsCache.get(key);
     if (cached && Date.now() - cached.at < EST_CACHE_TTL_MS) {
-      res.setHeader("Cache-Control", "private, max-age=10");
-      res.setHeader("X-Cache", "HIT");
+      setPublicApiCacheHeaders(res, cached.etag, true);
+      const inm = String(req.header("if-none-match") || "");
+      if (inm && inm === cached.etag) return res.status(304).end();
       return res.json(cached.body);
     }
 
@@ -388,11 +443,16 @@ export async function registerRoutes(
     ];
     if (category && category !== "all") whereParts.push(eq(establishments.category, category));
 
-    const candidateLimit = Math.min(20000, Math.max(2000, limit * 3));
+    // Important: Without ORDER BY, LIMIT can return arbitrary rows => some categories might "randomly" disappear.
+    // We order by a cheap approximate distance so results are stable and relevant.
+    const candidateLimit = Math.min(60000, Math.max(5000, limit * 12));
     const candidates = await db
       .select()
       .from(establishments)
       .where(and(...whereParts))
+      .orderBy(
+        sql`ABS(${establishments.lat} - ${lat}) + ABS(${establishments.lng} - ${lng})`,
+      )
       .limit(candidateLimit);
 
     const qLower = q.toLowerCase();
@@ -408,13 +468,15 @@ export async function registerRoutes(
       .slice(0, limit);
 
     const body = { establishments: filtered };
-    establishmentsCache.set(key, { at: Date.now(), body });
+    const etag = computeWeakEtag(body);
+    establishmentsCache.set(key, { at: Date.now(), body, etag });
     if (establishmentsCache.size > 200) {
       const first = establishmentsCache.keys().next().value;
       if (first) establishmentsCache.delete(first);
     }
-    res.setHeader("Cache-Control", "private, max-age=10");
-    res.setHeader("X-Cache", "MISS");
+    setPublicApiCacheHeaders(res, etag, false);
+    const inm = String(req.header("if-none-match") || "");
+    if (inm && inm === etag) return res.status(304).end();
     return res.json(body);
   });
 
@@ -456,6 +518,8 @@ export async function registerRoutes(
         published: true,
       })
       .returning();
+    // New place => invalidate nearby caches quickly.
+    establishmentsCache.clear();
     return res.status(201).json({ establishment: rows[0] });
   });
 

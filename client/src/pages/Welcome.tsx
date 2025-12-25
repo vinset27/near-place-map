@@ -1,6 +1,6 @@
 import React from "react";
 import { useLocation } from "wouter";
-import { Compass, ListChecks, MapPin, Navigation, Sparkles } from "lucide-react";
+import { Compass, ListChecks, Navigation, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getNextParam } from "@/lib/onboarding";
 import bg from "@assets/cave2.jpg";
@@ -45,7 +45,8 @@ export default function Welcome() {
                 Découvre les meilleurs spots autour de toi.
               </h1>
               <p className="mt-4 text-white/80 text-base leading-relaxed max-w-xl">
-                Bars, maquis, lounges, caves — sélection claire, infos utiles, itinéraire, et suivi en temps réel pendant le trajet.
+                Bars, maquis, lounges, caves — sélection claire, infos utiles, itinéraire, et suivi en temps réel
+                pendant le trajet.
               </p>
 
               <div className="mt-8 flex flex-col sm:flex-row gap-3">

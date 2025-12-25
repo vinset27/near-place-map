@@ -5,14 +5,15 @@ import type { Establishment } from '@/lib/data';
 import { Command, CommandEmpty, CommandItem, CommandList } from '@/components/ui/command';
 import { rankEstablishmentSuggestions } from '@/lib/suggestions';
 import React, { useMemo, useRef, useState } from 'react';
+import { formatDistance } from "@/lib/routing";
 
 interface FilterBarProps {
   activeFilter: string;
   onFilterChange: (filter: string) => void;
   query: string;
   onQueryChange: (q: string) => void;
-  radiusKm: 5 | 10 | 25;
-  onRadiusKmChange: (r: 5 | 10 | 25) => void;
+  radiusKm: 5 | 10 | 25 | 50 | 200;
+  onRadiusKmChange: (r: 5 | 10 | 25 | 50 | 200) => void;
   showEvents: boolean;
   onShowEventsChange: (v: boolean) => void;
   suggestions?: Establishment[];
@@ -89,7 +90,12 @@ export default function FilterBar({
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-semibold truncate">{r.name}</div>
                         <div className="text-xs text-muted-foreground truncate">
-                          {r.commune} • {r.categoryLabel}
+                          {r.commune ? `${r.commune} • ` : ""}{r.categoryLabel}
+                          {typeof (r as any).distanceMeters === "number" && (
+                            <span className="ml-2 text-primary font-semibold">
+                              {formatDistance((r as any).distanceMeters)}
+                            </span>
+                          )}
                         </div>
                       </div>
                       <div className="text-xs text-primary font-semibold">Itinéraire</div>
@@ -107,10 +113,10 @@ export default function FilterBar({
         <div className="flex items-center gap-2">
           <div className="text-xs font-semibold text-muted-foreground">Rayon</div>
           <div className="flex gap-2">
-          {[5, 10, 25].map((r) => (
+          {[5, 10, 25, 50, 200].map((r) => (
             <button
               key={r}
-              onClick={() => onRadiusKmChange(r as 5 | 10 | 25)}
+              onClick={() => onRadiusKmChange(r as any)}
               className={cn(
                 "px-3 py-1 rounded-full text-xs font-semibold border transition-colors",
                 radiusKm === r
@@ -118,7 +124,7 @@ export default function FilterBar({
                   : "bg-background/80 backdrop-blur-md text-foreground border-border/60 hover:bg-secondary",
               )}
             >
-              {r}km
+              {r === 200 ? "CI" : `${r}km`}
             </button>
           ))}
           </div>

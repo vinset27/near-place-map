@@ -8,7 +8,7 @@ interface RouteLayerProps {
   userLng: number;
   destLat: number;
   destLng: number;
-  mode?: 'driving' | 'walking';
+  mode?: 'driving' | 'walking' | 'cycling';
   onRouteUpdate?: (route: RouteInfo | null) => void;
 }
 
@@ -49,6 +49,13 @@ export default function RouteLayer({
       const start = { lat: userLat, lng: userLng };
       const dest = { lat: destLat, lng: destLng };
 
+      // If we're basically at the destination, keep the last known route (don't clear it).
+      // This prevents the line from disappearing right at the end due to GPS jitter.
+      if (haversineMeters(start, dest) < 25) {
+        if (isMounted) setLoading(false);
+        return;
+      }
+
       // Avoid hammering the Directions API on every GPS tick.
       // Recalculate only if the user moved significantly, or destination changed.
       const last = lastFetchRef.current;
@@ -62,15 +69,15 @@ export default function RouteLayer({
           route && route.geometry && route.geometry.length > 1
             ? distanceToRouteMeters(start, route.geometry)
             : 0;
-        const offRouteThreshold = mode === 'walking' ? 18 : 28;
-        const rerouteCooldownMs = mode === 'walking' ? 4500 : 6000;
+        const offRouteThreshold = mode === 'walking' ? 18 : mode === 'cycling' ? 22 : 28;
+        const rerouteCooldownMs = mode === 'walking' ? 4500 : mode === 'cycling' ? 5200 : 6000;
         const shouldRerouteForDeviation =
           offRoute > offRouteThreshold && now - lastFetchAtRef.current > rerouteCooldownMs;
 
         // Refresh more frequently so the route stays "best" while moving (Glovo-like),
         // without hammering the API.
-        const movedThreshold = mode === 'walking' ? 45 : 120;
-        const minRefreshMs = mode === 'walking' ? 2500 : 3500;
+        const movedThreshold = mode === 'walking' ? 45 : mode === 'cycling' ? 80 : 120;
+        const minRefreshMs = mode === 'walking' ? 2500 : mode === 'cycling' ? 3000 : 3500;
 
         if (!destChanged && !shouldRerouteForDeviation && moved < movedThreshold) {
           // No reroute needed; don't set state on every GPS tick.
@@ -83,11 +90,19 @@ export default function RouteLayer({
       const routeData = await getRoute(userLng, userLat, destLng, destLat, mode);
       
       if (isMounted) {
-        setRoute(routeData);
+        // Sticky behavior: do NOT clear an existing route on transient failures.
+        // Keep last good polyline until we successfully fetch a new one.
+        if (routeData) {
+          setRoute(routeData);
+        } else if (!route) {
+          setRoute(null);
+        }
         lastFetchRef.current = { start, dest };
         lastFetchAtRef.current = Date.now();
         if (onRouteUpdate) {
-          onRouteUpdate(routeData);
+          // Same sticky behavior for parent UI (distance/duration):
+          // only report null if we don't have any route at all.
+          onRouteUpdate(routeData ?? route ?? null);
         }
         setLoading(false);
       }
@@ -98,7 +113,7 @@ export default function RouteLayer({
     return () => {
       isMounted = false;
     };
-  }, [userLat, userLng, destLat, destLng, mode, onRouteUpdate]);
+  }, [userLat, userLng, destLat, destLng, mode, onRouteUpdate, route]);
 
   if (!route) {
     return null;

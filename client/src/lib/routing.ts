@@ -1,4 +1,5 @@
 import { MAPBOX_TOKEN } from "@/lib/mapbox";
+import { debugLog } from "@/lib/debug";
 
 export interface RouteStep {
   distance: number; // meters
@@ -22,7 +23,8 @@ export interface RouteInfo {
 }
 
 type CachedRoute = { at: number; value: RouteInfo | null };
-const ROUTE_TTL_MS = 45_000;
+// Keep routes cached longer so Navigation doesn't immediately recompute after Details.
+const ROUTE_TTL_MS = 3 * 60_000;
 const routeCache = new Map<string, CachedRoute>();
 const inflight = new Map<string, Promise<RouteInfo | null>>();
 
@@ -36,7 +38,7 @@ function routeKey(
   startLat: number,
   endLng: number,
   endLat: number,
-  mode: "driving" | "walking",
+  mode: "driving" | "walking" | "cycling",
 ) {
   // Round coordinates to dedupe noisy GPS updates while still being accurate enough for navigation.
   return `${mode}:${round4(startLng)},${round4(startLat)}->${round4(endLng)},${round4(endLat)}`;
@@ -47,7 +49,7 @@ export async function getRoute(
   startLat: number,
   endLng: number,
   endLat: number,
-  mode: 'driving' | 'walking' = 'driving'
+  mode: 'driving' | 'walking' | 'cycling' = 'driving'
 ): Promise<RouteInfo | null> {
   try {
     const key = routeKey(startLng, startLat, endLng, endLat, mode);
@@ -57,17 +59,22 @@ export async function getRoute(
     if (inF) return await inF;
 
     const p = (async () => {
-    const response = await fetch(
-      `https://api.mapbox.com/directions/v5/mapbox/${mode}/${startLng},${startLat};${endLng},${endLat}?access_token=${MAPBOX_TOKEN}&geometries=geojson&steps=true&banner_instructions=true&language=fr`
-    );
+    const url =
+      `https://api.mapbox.com/directions/v5/mapbox/${mode}/` +
+      `${startLng},${startLat};${endLng},${endLat}` +
+      `?access_token=${MAPBOX_TOKEN}&geometries=geojson&steps=true&banner_instructions=true&language=fr`;
+    debugLog("getRoute request", { key, url });
+    const response = await fetch(url);
 
     if (!response.ok) {
       const bodyText = await response.text().catch(() => "");
+      debugLog("getRoute error", { key, status: response.status, bodyHead: bodyText.slice(0, 300) });
       console.error('Mapbox Directions API error:', response.status, bodyText.slice(0, 500));
       return null as RouteInfo | null;
     }
 
     const data = await response.json();
+    debugLog("getRoute response", { key, code: data?.code || null, routes: data?.routes?.length ?? 0 });
 
     if (data?.code && data.code !== "Ok") {
       console.error("Mapbox Directions API non-Ok:", data.code, data.message || "");

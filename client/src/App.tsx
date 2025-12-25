@@ -19,6 +19,8 @@ import Ready from "@/pages/Ready";
 import React, { useEffect } from "react";
 import { RequireOnboarding } from "@/components/RequireOnboarding";
 import { startTimeThemeSync } from "@/lib/timeTheme";
+import { AnimatePresence, motion } from "framer-motion";
+import { useLocation } from "wouter";
 
 function Protected({ children }: { children: React.ReactNode }) {
   return <RequireOnboarding>{children}</RequireOnboarding>;
@@ -48,11 +50,23 @@ function Router() {
 
 function App() {
   useEffect(() => startTimeThemeSync(), []);
+  const [loc] = useLocation();
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
-        <Router />
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={loc}
+            initial={{ opacity: 0, y: 10, filter: "blur(4px)" }}
+            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            exit={{ opacity: 0, y: -8, filter: "blur(4px)" }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            style={{ height: "100%" }}
+          >
+            <Router />
+          </motion.div>
+        </AnimatePresence>
       </TooltipProvider>
     </QueryClientProvider>
   );

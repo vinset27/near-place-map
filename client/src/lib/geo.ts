@@ -20,4 +20,9 @@ export function haversineMeters(
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+// Rounding helper to reduce GPS jitter / noisy query keys (~11m at equator).
+export function round4(n: number): number {
+  return Math.round(n * 1e4) / 1e4;
+}
+
 

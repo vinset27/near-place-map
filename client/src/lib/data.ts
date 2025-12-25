@@ -22,6 +22,8 @@ export interface Establishment {
     lat: number;
     lng: number;
   };
+  // Optional: computed at runtime (list/map) or returned by API.
+  distanceMeters?: number;
   rating: number;
   isOpen: boolean;
   imageUrl: string;

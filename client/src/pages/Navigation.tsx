@@ -8,6 +8,9 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { fetchEstablishmentById, fetchEstablishmentsNearby, toUiEstablishment } from '@/lib/establishmentsApi';
 import { haversineMeters } from '@/lib/geo';
 import { telHref } from '@/lib/contact';
+import walkGif from "@assets/walk.gif";
+import veloGif from "@assets/velo.gif";
+import voitureGif from "@assets/voiture.gif";
 
 export default function NavigationPage() {
   const sp = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
@@ -27,9 +30,10 @@ export default function NavigationPage() {
   const [accuracyM, setAccuracyM] = useState<number | undefined>(undefined);
   const [heading, setHeading] = useState<number | null>(null);
   const [navActive, setNavActive] = useState(false);
+  const [routeEnabled, setRouteEnabled] = useState(true);
   const [navMapStyle, setNavMapStyle] = useState<'navigation' | 'satellite'>('navigation');
-  const [travelMode, setTravelMode] = useState<'driving' | 'walking'>(
-    modeParam === 'walking' ? 'walking' : 'driving',
+  const [travelMode, setTravelMode] = useState<'driving' | 'walking' | 'cycling'>(
+    modeParam === 'walking' ? 'walking' : modeParam === 'cycling' ? 'cycling' : 'driving',
   );
   const [recenterSeq, setRecenterSeq] = useState(0);
   const lastGpsRef = useRef<{ t: number; lat: number; lng: number } | null>(null);
@@ -123,9 +127,10 @@ export default function NavigationPage() {
 
     // Mobile-first: omit `origin` so Google Maps uses the phone's native GPS location,
     // which is often much more accurate than browser geolocation over Wi‑Fi IP HTTP.
+    const googleMode = travelMode === "cycling" ? "bicycling" : travelMode;
     const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
       destination,
-    )}&travelmode=${travelMode}&dir_action=navigate`;
+    )}&travelmode=${googleMode}&dir_action=navigate`;
     window.open(googleMapsUrl, '_blank', 'noopener,noreferrer');
   };
 
@@ -150,6 +155,7 @@ export default function NavigationPage() {
           navMapStyle={navMapStyle}
           recenterSeq={recenterSeq}
           routeMode={travelMode}
+          routeEnabled={routeEnabled}
           establishmentsData={establishment ? [establishment, ...establishments] : establishments}
         />
       </div>
@@ -189,6 +195,16 @@ export default function NavigationPage() {
             </div>
 
             {/* Distance Info */}
+            {routeInfo === undefined && (
+              <div className="rounded-xl bg-secondary/40 border border-border p-3 flex items-center gap-3">
+                <img
+                  src={travelMode === "walking" ? walkGif : travelMode === "cycling" ? veloGif : voitureGif}
+                  alt={travelMode === "walking" ? "Marche" : travelMode === "cycling" ? "Vélo" : "Voiture"}
+                  className="h-10 w-10 object-contain"
+                />
+                <div className="text-sm font-semibold text-foreground">Calcul de l’itinéraire…</div>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-primary/10 border border-primary/20 rounded-xl p-3">
                 <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Distance</p>
@@ -243,6 +259,17 @@ export default function NavigationPage() {
                 >
                   À pied
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setTravelMode('cycling')}
+                  className={`px-3 h-12 rounded-xl text-xs font-bold border ${
+                    travelMode === 'cycling'
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'bg-background text-foreground border-border'
+                  }`}
+                >
+                  Vélo
+                </button>
               </div>
               {tel ? (
                 <Button asChild className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold h-12 rounded-xl">
@@ -258,7 +285,10 @@ export default function NavigationPage() {
                 </Button>
               )}
               <Button
-                onClick={() => setNavActive(true)}
+                onClick={() => {
+                  setRouteEnabled(true);
+                  setNavActive(true);
+                }}
                 className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground font-bold h-12 rounded-xl"
               >
                 <Navigation className="w-4 h-4 mr-2" />
@@ -316,7 +346,11 @@ export default function NavigationPage() {
                 <Button
                   variant="destructive"
                   className="h-10 px-3"
-                  onClick={() => setNavActive(false)}
+                  onClick={() => {
+                    setNavActive(false);
+                    // As requested: once user stops, we can hide the route.
+                    setRouteEnabled(false);
+                  }}
                 >
                   Stop
                 </Button>

@@ -128,3 +128,37 @@ html {
 .mapboxgl-ctrl-logo {
   display: none !important;
 }
+
+/* Mapbox controls: make +/- and geolocate look "app-like" and visible on any map style */
+.mapboxgl-ctrl-top-right {
+  top: 12px !important;
+  right: 12px !important;
+}
+
+.mapboxgl-ctrl-group {
+  background: hsla(var(--background) / 0.82) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18) !important;
+  border-radius: 16px !important;
+  overflow: hidden !important;
+  backdrop-filter: blur(14px) !important;
+}
+
+.mapboxgl-ctrl-group button {
+  width: 44px !important;
+  height: 44px !important;
+}
+
+.mapboxgl-ctrl-group button + button {
+  border-top: 1px solid hsl(var(--border)) !important;
+}
+
+.mapboxgl-ctrl button.mapboxgl-ctrl-icon {
+  filter: none;
+}
+
+.mapboxgl-ctrl button:focus {
+  outline: none !important;
+  box-shadow: 0 0 0 2px hsla(var(--ring) / 0.45) inset !important;
+}
+

@@ -1,11 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import EstablishmentCard from '@/components/EstablishmentCard';
 import BottomNav from '@/components/BottomNav';
 import { establishments as staticEstablishments } from '@/lib/data';
 import { Search } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchEstablishmentsNearby, toUiEstablishment } from '@/lib/establishmentsApi';
-import { haversineMeters } from '@/lib/geo';
+import { haversineMeters, round4 } from '@/lib/geo';
 import { ESTABLISHMENT_CATEGORIES } from '@/lib/categories';
 import { Command, CommandEmpty, CommandItem, CommandList } from '@/components/ui/command';
 import { rankEstablishmentSuggestions } from '@/lib/suggestions';
@@ -14,39 +14,62 @@ import { useLocation } from 'wouter';
 export default function List() {
   const [, setLocation] = useLocation();
   const [query, setQuery] = useState('');
-  const [radiusKm, setRadiusKm] = useState<5 | 10 | 25>(10);
+  const [radiusKm, setRadiusKm] = useState<5 | 10 | 25 | 50 | 200>(10);
   const [category, setCategory] = useState('all');
-  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | undefined>();
+  // Only update origin occasionally (avoids list "refreshing" every second on mobile GPS jitter).
+  const [dbOrigin, setDbOrigin] = useState<{ lat: number; lng: number }>({ lat: 5.3261, lng: -4.02 });
+  const lastDbOriginRef = useRef<{ t: number; lat: number; lng: number } | null>(null);
   const [openSuggest, setOpenSuggest] = useState(false);
 
   useEffect(() => {
     if (!navigator.geolocation) return;
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
-        setUserLocation({ lat: position.coords.latitude, lng: position.coords.longitude });
+        const nextRaw = { lat: position.coords.latitude, lng: position.coords.longitude };
+        const next = { lat: round4(nextRaw.lat), lng: round4(nextRaw.lng) };
+        const now = Date.now();
+        const last = lastDbOriginRef.current;
+        if (last) {
+          const moved = haversineMeters({ lat: last.lat, lng: last.lng }, next);
+          // If stationary, don't refetch/re-render due to tiny GPS jitter.
+          if (moved < 35 && now - last.t < 8000) return;
+        }
+        lastDbOriginRef.current = { t: now, lat: next.lat, lng: next.lng };
+        setDbOrigin(next);
       },
-      () => setUserLocation({ lat: 5.3261, lng: -4.02 }),
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 },
+      () => {
+        // Keep default if permission denied/unavailable
+      },
+      {
+        enableHighAccuracy: false,
+        maximumAge: 15000,
+        timeout: 10000,
+      },
     );
     return () => navigator.geolocation.clearWatch(watchId);
   }, []);
 
-  const origin = userLocation ?? { lat: 5.3261, lng: -4.02 };
+  const originForDbRounded = useMemo(
+    () => ({ lat: round4(dbOrigin.lat), lng: round4(dbOrigin.lng) }),
+    [dbOrigin.lat, dbOrigin.lng],
+  );
   const q = query.trim().toLowerCase();
 
   const { data: dbNearby, error: dbError } = useQuery({
-    queryKey: ['list-establishments', origin.lat, origin.lng, radiusKm, category, q],
-    enabled: Number.isFinite(origin.lat) && Number.isFinite(origin.lng),
+    queryKey: ['list-establishments', originForDbRounded.lat, originForDbRounded.lng, radiusKm, category, q],
+    enabled: Number.isFinite(originForDbRounded.lat) && Number.isFinite(originForDbRounded.lng),
     queryFn: async () =>
       fetchEstablishmentsNearby({
-        lat: origin.lat,
-        lng: origin.lng,
+        lat: originForDbRounded.lat,
+        lng: originForDbRounded.lng,
         radiusKm,
-        limit: 500,
+        limit: radiusKm >= 200 ? 3000 : radiusKm >= 50 ? 1500 : radiusKm >= 25 ? 900 : 500,
         category,
         q: query.trim(),
       }),
-    staleTime: 1000 * 20,
+    staleTime: 1000 * 60 * 5,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
   });
 
   const merged = useMemo(() => {
@@ -56,7 +79,8 @@ export default function List() {
     for (const e of [...db, ...staticEstablishments]) {
       if (seen.has(e.id)) continue;
       seen.add(e.id);
-      out.push(e);
+      const d = haversineMeters(originForDbRounded, e.coordinates);
+      out.push({ ...e, distanceMeters: d });
     }
     return out
       .filter((e) => {
@@ -69,9 +93,10 @@ export default function List() {
       })
       .sort(
         (a, b) =>
-          haversineMeters(origin, a.coordinates) - haversineMeters(origin, b.coordinates),
+          (a.distanceMeters ?? haversineMeters(originForDbRounded, a.coordinates)) -
+          (b.distanceMeters ?? haversineMeters(originForDbRounded, b.coordinates)),
       );
-  }, [dbNearby, staticEstablishments, origin, radiusKm, category, q, query]);
+  }, [dbNearby, category, q, query, originForDbRounded.lat, originForDbRounded.lng]);
 
   const ranked = useMemo(() => rankEstablishmentSuggestions(query, merged, 8), [query, merged]);
 
@@ -157,17 +182,17 @@ export default function List() {
           </div>
 
           <div className="flex gap-2">
-            {[5, 10, 25].map((r) => (
+            {[5, 10, 25, 50, 200].map((r) => (
               <button
                 key={r}
-                onClick={() => setRadiusKm(r as 5 | 10 | 25)}
+                onClick={() => setRadiusKm(r as any)}
                 className={`px-3 py-1 rounded-full text-xs font-semibold border ${
                   radiusKm === r
                     ? 'bg-primary text-primary-foreground border-primary'
                     : 'bg-background/60 border-border text-foreground'
                 }`}
               >
-                {r}km
+                {r === 200 ? "CI" : `${r}km`}
               </button>
             ))}
           </div>

@@ -1,6 +1,7 @@
 import type { Establishment } from "@/lib/data";
 import { placeholderImageDataUrl } from "@/lib/placeImages";
 import { apiUrl } from "@/lib/apiBase";
+import { debugLog } from "@/lib/debug";
 
 export type ApiEstablishment = {
   id: string;
@@ -26,9 +27,11 @@ export function toUiEstablishment(e: ApiEstablishment): Establishment {
     category,
     description: e.description || "Nouveau lieu ajouté sur la carte.",
     address: e.address || "",
-    commune: (e.commune || "Plateau") as any,
+    // Don't default to "Plateau" (that was causing wrong addresses everywhere).
+    commune: (e.commune || "") as any,
     phone: e.phone ?? null,
     coordinates: { lat: e.lat, lng: e.lng },
+    distanceMeters: typeof e.distanceMeters === "number" ? e.distanceMeters : undefined,
     rating: 4.5,
     isOpen: true,
     // Always prioritize uploaded photos (R2/DB). If missing, use a unique deterministic placeholder.
@@ -36,6 +39,33 @@ export function toUiEstablishment(e: ApiEstablishment): Establishment {
     features: [],
     photos: Array.isArray(e.photos) ? e.photos : undefined,
   };
+}
+
+async function parseJsonOrThrow<T>(res: Response, url: string): Promise<T> {
+  const contentType = String(res.headers.get("content-type") || "");
+  const text = await res.text().catch(() => "");
+  if (!res.ok) {
+    // Keep the server error body (often JSON) for visibility.
+    throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 500)}`);
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch (e) {
+    // This happens when we accidentally hit the frontend (HTML) instead of the API (JSON),
+    // e.g. wrong VITE_API_BASE_URL or DNS misconfiguration for api.<domain>.
+    const head = text.slice(0, 220).replace(/\s+/g, " ").trim();
+    // Log full context to the console for fast debugging in production.
+    console.error("API returned non-JSON response", {
+      url,
+      status: res.status,
+      contentType,
+      head,
+    });
+    throw new Error(
+      `API returned non-JSON response (status=${res.status}, content-type=${contentType}) from ${url}. ` +
+        `Head: ${head}`,
+    );
+  }
 }
 
 export async function fetchEstablishmentsNearby(params: {
@@ -66,18 +96,19 @@ export async function fetchEstablishmentsNearby(params: {
   if (params.q) sp.set("q", params.q);
 
   // Public endpoint: do not send cookies/credentials (simplifies CORS for split-origin deployments).
-  const res = await fetch(apiUrl(`/api/establishments?${sp.toString()}`));
-  if (!res.ok) throw new Error(await res.text());
-  const data = await res.json();
+  const url = apiUrl(`/api/establishments?${sp.toString()}`);
+  debugLog("fetchEstablishmentsNearby", { url, params });
+  const res = await fetch(url);
+  const data = await parseJsonOrThrow<{ establishments?: ApiEstablishment[] }>(res, url);
   return (data?.establishments || []) as ApiEstablishment[];
 }
 
 export async function fetchEstablishmentById(id: string): Promise<ApiEstablishment | null> {
   // Public endpoint: do not send cookies/credentials (simplifies CORS for split-origin deployments).
-  const res = await fetch(apiUrl(`/api/establishments/${encodeURIComponent(id)}`));
+  const url = apiUrl(`/api/establishments/${encodeURIComponent(id)}`);
+  const res = await fetch(url);
   if (res.status === 404) return null;
-  if (!res.ok) throw new Error(await res.text());
-  const data = await res.json();
+  const data = await parseJsonOrThrow<{ establishment?: ApiEstablishment | null }>(res, url);
   return (data?.establishment || null) as ApiEstablishment | null;
 }
 

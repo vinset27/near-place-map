@@ -1,11 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { useRoute, useLocation } from 'wouter';
 import { establishments } from '@/lib/data';
-import { ArrowLeft, Phone, Share2, Navigation, MapPin, Star, MessageCircle } from 'lucide-react';
+import { ArrowLeft, Phone, Share2, Navigation, MapPin, Star, MessageCircle, LocateFixed } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { motion } from 'framer-motion';
 import { getRoute, formatDistance, formatDuration } from '@/lib/routing';
 import { fetchEstablishmentById, toUiEstablishment } from '@/lib/establishmentsApi';
+import LocationPickerDialog from "@/components/LocationPickerDialog";
+import { haversineMeters } from "@/lib/geo";
+import walkGif from "@assets/walk.gif";
+import veloGif from "@assets/velo.gif";
+import voitureGif from "@assets/voiture.gif";
 import {
   buildPlaceShareText,
   googleMapsLatLngUrl,
@@ -26,9 +31,25 @@ export default function Details() {
   const [loadingEst, setLoadingEst] = useState(!local);
   
   const [userLoc, setUserLoc] = useState({ lat: 5.3261, lng: -4.0200 });
+  const [hasGps, setHasGps] = useState(false);
+  const [originOverride, setOriginOverride] = useState<{ lat: number; lng: number } | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = window.localStorage.getItem("NEARPLACE_ORIGIN");
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      const lat = Number(parsed?.lat);
+      const lng = Number(parsed?.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      return { lat, lng };
+    } catch {
+      return null;
+    }
+  });
+  const [originPickerOpen, setOriginPickerOpen] = useState(false);
   const [routeInfo, setRouteInfo] = useState<any>(null);
   const [routeLoading, setRouteLoading] = useState(true);
-  const [travelMode, setTravelMode] = useState<'driving' | 'walking'>('driving');
+  const [travelMode, setTravelMode] = useState<'driving' | 'walking' | 'cycling'>('driving');
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -70,19 +91,38 @@ export default function Details() {
           lng: position.coords.longitude,
         };
         setUserLoc(loc);
+        setHasGps(true);
+        try {
+          window.localStorage.setItem("NEARPLACE_LAST_GPS", JSON.stringify(loc));
+        } catch {}
         fetchRoute(loc, travelMode);
       }, () => {
+        setHasGps(false);
+        // If user denied GPS, fall back to a user-picked origin (if any).
+        if (originOverride) {
+          fetchRoute(originOverride, travelMode);
+          return;
+        }
+        // Otherwise keep current fallback; route might be meaningless (0m) if dest matches fallback.
         fetchRoute(userLoc, travelMode);
       });
     } else {
       fetchRoute(userLoc, travelMode);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [establishment?.id, travelMode]);
 
-  const fetchRoute = async (location: { lat: number; lng: number }, mode: 'driving' | 'walking') => {
+  const fetchRoute = async (location: { lat: number; lng: number }, mode: 'driving' | 'walking' | 'cycling') => {
     if (!establishment) return;
     
     setRouteLoading(true);
+    // If origin ~ destination, don't bother calling Directions (user is "already there" or GPS missing).
+    const d = haversineMeters(location, establishment.coordinates);
+    if (d < 25) {
+      setRouteInfo({ distance: 0, duration: 0, geometry: [], steps: [] });
+      setRouteLoading(false);
+      return;
+    }
     const route = await getRoute(
       location.lng,
       location.lat,
@@ -94,10 +134,22 @@ export default function Details() {
     setRouteLoading(false);
   };
 
+  if (loadingEst) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-6">
+        <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 text-center">
+          <img src="/favicon.png" alt="O’Show" className="h-10 w-10 mx-auto mb-3 rounded-xl border border-border" />
+          <div className="text-sm font-bold text-foreground">Chargement de la page…</div>
+          <div className="mt-1 text-xs text-muted-foreground">On prépare les infos + l’itinéraire.</div>
+        </div>
+      </div>
+    );
+  }
+
   if (!establishment) {
     return (
       <div className="p-8 text-center text-foreground">
-        {loadingEst ? "Chargement…" : "Établissement non trouvé"}
+        Établissement non trouvé
       </div>
     );
   }
@@ -117,6 +169,8 @@ export default function Details() {
   const shareSms = () => {
     window.location.href = smsShareHref(shareText);
   };
+
+  const approxMetersFromUser = haversineMeters(originOverride ?? userLoc, establishment.coordinates);
 
   const ShareMenu = ({ trigger }: { trigger: React.ReactNode }) => (
     <DropdownMenu>
@@ -228,6 +282,12 @@ export default function Details() {
                    <span>{formatDistance(routeInfo.distance)} • {formatDuration(routeInfo.duration)}</span>
                  </div>
                )}
+               {routeLoading && (
+                 <div className="flex items-center text-white/90 text-sm">
+                   <Navigation className="w-4 h-4 mr-1" />
+                   <span>À {formatDistance(approxMetersFromUser)}</span>
+                 </div>
+               )}
             </div>
           </motion.div>
         </div>
@@ -273,6 +333,18 @@ export default function Details() {
             </div>
           </motion.div>
         )}
+        
+        {/* Loading state: show an animated hint */}
+        {routeLoading && (
+          <div className="rounded-xl bg-secondary/40 border border-border p-3 flex items-center gap-3">
+            <img
+              src={travelMode === "walking" ? walkGif : travelMode === "cycling" ? veloGif : voitureGif}
+              alt={travelMode === "walking" ? "Marche" : travelMode === "cycling" ? "Vélo" : "Voiture"}
+              className="h-10 w-10 object-contain"
+            />
+            <div className="text-sm font-semibold text-foreground">Calcul de l’itinéraire…</div>
+          </div>
+        )}
 
         <section>
           <h2 className="text-lg font-bold text-foreground mb-2">À propos</h2>
@@ -316,7 +388,48 @@ export default function Details() {
           >
             À pied
           </button>
+          <button
+            type="button"
+            onClick={() => setTravelMode('cycling')}
+            className={`px-3 py-2 rounded-full text-xs font-bold border ${
+              travelMode === 'cycling'
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'bg-background text-foreground border-border'
+            }`}
+          >
+            Vélo
+          </button>
         </section>
+
+        {/* If GPS is missing, let user manually pick a departure point so route always works */}
+        {!hasGps && (
+          <section className="flex items-center justify-center">
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-xl"
+              onClick={() => setOriginPickerOpen(true)}
+            >
+              <LocateFixed className="w-4 h-4 mr-2" />
+              Choisir mon départ
+            </Button>
+          </section>
+        )}
+
+        <LocationPickerDialog
+          open={originPickerOpen}
+          onOpenChange={setOriginPickerOpen}
+          value={originOverride}
+          title="Choisir le point de départ"
+          onPick={(v) => {
+            setOriginOverride(v);
+            try {
+              window.localStorage.setItem("NEARPLACE_ORIGIN", JSON.stringify(v));
+            } catch {}
+            // Recompute route immediately with the chosen origin.
+            fetchRoute(v, travelMode);
+          }}
+        />
 
         {/* Action Buttons */}
         <div className="fixed bottom-0 left-0 right-0 p-4 bg-background/90 backdrop-blur-xl border-t border-border flex space-x-3 z-20 pb-safe">
@@ -346,9 +459,9 @@ export default function Details() {
            <Button 
              onClick={() =>
                setLocation(
-                 `/navigation?id=${establishment.id}&mode=${travelMode}&slat=${encodeURIComponent(
-                   String(userLoc.lat),
-                 )}&slng=${encodeURIComponent(String(userLoc.lng))}`,
+                `/navigation?id=${establishment.id}&mode=${travelMode}&slat=${encodeURIComponent(
+                  String((originOverride ?? userLoc).lat),
+                )}&slng=${encodeURIComponent(String((originOverride ?? userLoc).lng))}`,
                )
              }
              className="flex-[2] bg-primary hover:bg-primary/90 text-primary-foreground font-bold h-12 rounded-xl"

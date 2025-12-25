@@ -1,9 +1,9 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import MapView from '@/components/Map';
 import BottomNav from '@/components/BottomNav';
 import FilterBar from '@/components/FilterBar';
 import { establishments as staticEstablishments } from '@/lib/data';
-import { haversineMeters } from '@/lib/geo';
+import { haversineMeters, round4 } from '@/lib/geo';
 import { getUpcomingEventsForEstablishments } from '@/lib/events';
 import { fetchEstablishmentsNearby, toUiEstablishment } from '@/lib/establishmentsApi';
 import { useQuery } from '@tanstack/react-query';
@@ -13,26 +13,43 @@ export default function Home() {
   const [query, setQuery] = useState('');
   const [highlightedId, setHighlightedId] = useState<string | undefined>(undefined);
   // Default wider radius so Cocody/Angré shows up immediately for most users.
-  const [radiusKm, setRadiusKm] = useState<5 | 10 | 25>(25);
+  const [radiusKm, setRadiusKm] = useState<5 | 10 | 25 | 50 | 200>(25);
   const [showEvents, setShowEvents] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | undefined>();
+  // Use a stabilized origin for DB fetches so tiny GPS jitter doesn't refetch every second on mobile.
+  const [dbOrigin, setDbOrigin] = useState<{ lat: number; lng: number } | undefined>();
+  const lastGpsRef = useRef<{ t: number; lat: number; lng: number } | null>(null);
+  const lastDbOriginRef = useRef<{ t: number; lat: number; lng: number } | null>(null);
 
   useEffect(() => {
     if (navigator.geolocation) {
       const watchId = navigator.geolocation.watchPosition(
         (position) => {
-        setUserLocation({
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-        });
+          const next = { lat: position.coords.latitude, lng: position.coords.longitude };
+          const now = Date.now();
+          const last = lastGpsRef.current;
+          const acc = position.coords.accuracy;
+
+          if (last) {
+            const moved = haversineMeters({ lat: last.lat, lng: last.lng }, next);
+            // Reduce jitter + excessive rerenders on mobile.
+            // - If accuracy is poor (common on mobile), ignore small "moves".
+            if (typeof acc === "number" && acc > 80 && moved < 35 && now - last.t < 8000) return;
+            // - Normal throttle: don't update more than ~every 2s unless we really moved.
+            if (now - last.t < 2000 && moved < 12) return;
+          }
+
+          lastGpsRef.current = { t: now, lat: next.lat, lng: next.lng };
+          setUserLocation(next);
         },
         () => {
           // Default to Abidjan center if permission denied/unavailable
         setUserLocation({ lat: 5.3261, lng: -4.0200 });
         },
         {
-          enableHighAccuracy: true,
-          maximumAge: 0,
+          enableHighAccuracy: false,
+          // Allow some caching to reduce noisy updates / battery drain.
+          maximumAge: 15000,
           timeout: 10000,
         },
       );
@@ -44,6 +61,28 @@ export default function Home() {
   }, []);
 
   const origin = userLocation ?? { lat: 5.3261, lng: -4.0200 };
+  const originForDb = dbOrigin ?? origin;
+  const originForDbRounded = useMemo(
+    () => ({ lat: round4(originForDb.lat), lng: round4(originForDb.lng) }),
+    [originForDb.lat, originForDb.lng],
+  );
+  const originForUi = originForDbRounded;
+
+  // Update DB origin only when the user moved enough or enough time passed.
+  useEffect(() => {
+    if (!userLocation) return;
+    const now = Date.now();
+    const last = lastDbOriginRef.current;
+    if (last) {
+      const moved = haversineMeters({ lat: last.lat, lng: last.lng }, userLocation);
+      // If stationary, don't refetch the whole DB list due to tiny GPS jitter.
+      if (moved < 35 && now - last.t < 8000) return;
+    }
+    const next = { lat: round4(userLocation.lat), lng: round4(userLocation.lng) };
+    setDbOrigin(next);
+    lastDbOriginRef.current = { t: now, lat: next.lat, lng: next.lng };
+  }, [userLocation]);
+
   const radiusMeters = radiusKm * 1000;
   const q = query.trim().toLowerCase();
 
@@ -54,26 +93,29 @@ export default function Home() {
         const hay = `${e.name} ${e.address} ${e.commune} ${e.category}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
-      return haversineMeters(origin, e.coordinates) <= radiusMeters;
+      return haversineMeters(originForUi, e.coordinates) <= radiusMeters;
     })
     .sort(
       (a, b) =>
-        haversineMeters(origin, a.coordinates) - haversineMeters(origin, b.coordinates),
+        haversineMeters(originForUi, a.coordinates) - haversineMeters(originForUi, b.coordinates),
     );
 
   const { data: dbNearby, error: dbError } = useQuery({
-    queryKey: ['db-establishments', origin.lat, origin.lng, radiusKm, activeFilter, q],
-    enabled: Number.isFinite(origin.lat) && Number.isFinite(origin.lng),
+    queryKey: ['db-establishments', originForDbRounded.lat, originForDbRounded.lng, radiusKm, activeFilter, q],
+    enabled: Number.isFinite(originForDbRounded.lat) && Number.isFinite(originForDbRounded.lng),
     queryFn: async () =>
       fetchEstablishmentsNearby({
-        lat: origin.lat,
-        lng: origin.lng,
+        lat: originForDbRounded.lat,
+        lng: originForDbRounded.lng,
         radiusKm,
-        limit: radiusKm >= 25 ? 2000 : 1200,
+        limit: radiusKm >= 200 ? 5000 : radiusKm >= 50 ? 3500 : radiusKm >= 25 ? 2200 : 1200,
         category: activeFilter,
         q: query.trim(),
       }),
-    staleTime: 1000 * 30,
+    // Keep results for a while; avoid refetching just because user navigated between pages.
+    staleTime: 1000 * 60 * 5,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
   });
 
   const merged = useMemo(() => {
@@ -84,10 +126,12 @@ export default function Home() {
     for (const e of [...db, ...filteredStatic]) {
       if (seen.has(e.id)) continue;
       seen.add(e.id);
-      out.push(e);
+      // Ensure distance is available everywhere (list/map/details).
+      const d = haversineMeters(originForUi, e.coordinates);
+      out.push({ ...e, distanceMeters: d });
     }
     return out;
-  }, [dbNearby, filteredStatic]);
+  }, [dbNearby, filteredStatic, originForUi.lat, originForUi.lng]);
 
   const events = showEvents ? getUpcomingEventsForEstablishments(merged) : [];
 
