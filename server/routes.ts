@@ -7,10 +7,13 @@ import crypto from "crypto";
 import {
   businessApplications,
   businessApplySchema,
+  establishmentViews,
+  events,
   establishments,
   establishmentProfiles,
   insertUserSchema,
   upsertEstablishmentProfileSchema,
+  userEvents,
   users,
 } from "@shared/schema";
 import { hashPassword, verifyPassword } from "./auth";
@@ -19,6 +22,7 @@ import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { presignBusinessPhotoPut } from "./r2";
 import { googlePlacesNearbyAll, mapGoogleTypesToCategory } from "./googlePlaces";
+import { resendSendEmail } from "./resend";
 
 type EstablishmentsCacheEntry = { at: number; body: any; etag: string };
 const EST_CACHE_TTL_MS = 10_000;
@@ -48,10 +52,32 @@ declare module "express-session" {
   }
 }
 
+function asyncHandler(fn: (req: any, res: any, next: any) => any) {
+  return (req: any, res: any, next: any) => Promise.resolve(fn(req, res, next)).catch(next);
+}
+
+function isUuidLike(s: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(s || "").trim());
+}
+
 function requireAuth(req: any, res: any, next: any) {
   if (!req.session?.userId) return res.status(401).json({ message: "Unauthorized" });
   next();
 }
+
+const requireVerifiedEmail = asyncHandler(async (req: any, res: any, next: any) => {
+  if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+  const userId = req.session?.userId;
+  if (!userId) return res.status(401).json({ message: "Unauthorized" });
+  const rows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  const u = rows[0] as any;
+  if (!u) return res.status(401).json({ message: "Unauthorized" });
+  // Require verified email for user-generated/public actions
+  if (u.emailVerified === false) {
+    return res.status(403).json({ message: "Confirme ton email pour publier." });
+  }
+  return next();
+});
 
 async function requireEstablishment(req: any, res: any, next: any) {
   if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
@@ -60,26 +86,48 @@ async function requireEstablishment(req: any, res: any, next: any) {
   const rows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
   const u = rows[0];
   if (!u) return res.status(401).json({ message: "Unauthorized" });
+  // Require verified email before allowing Pro actions (events, publish, applications).
+  // But allow completing the profile itself even if email isn't verified yet.
+  if ((u as any).email && (u as any).emailVerified === false) {
+    return res.status(403).json({ message: "Confirme ton email pour activer les actions Pro." });
+  }
   if (u.role !== "establishment" || !u.profileCompleted) {
     return res.status(403).json({ message: "Establishment profile required" });
   }
   next();
 }
 
-function requireAdmin(req: any, res: any, next: any) {
+const requireAdmin = asyncHandler(async (req: any, res: any, next: any) => {
+  // Option A: session user with role=admin (admin profile)
+  if (db && req.session?.userId) {
+    const userId = String(req.session.userId);
+    const rows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const u = rows[0] as any;
+    if (u && u.role === "admin" && !u.deletedAt) return next();
+  }
+
+  // Option B: master token header (for Postman/CLI, or emergency access)
   const token = process.env.ADMIN_TOKEN;
   if (!token) return res.status(403).json({ message: "ADMIN_TOKEN not configured" });
   const got = String(req.header("x-admin-token") || "").trim();
   const expected = String(token).trim();
   if (!got) return res.status(403).json({ message: "Missing x-admin-token header" });
   if (got !== expected) return res.status(403).json({ message: "Invalid admin token" });
-  next();
-}
+  return next();
+});
 
 function safeUser(u: any) {
   if (!u) return null;
-  const { password, ...rest } = u;
+  const { password, emailVerificationToken, passwordResetCode, passwordResetSentAt, deletedAt, ...rest } = u;
   return rest;
+}
+
+function makeToken(bytes = 24): string {
+  return crypto.randomBytes(bytes).toString("hex");
+}
+
+function looksLikeEmail(s: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s || "").trim());
 }
 
 function haversineMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
@@ -125,6 +173,17 @@ function inferCommuneFromAddress(address: string | null | undefined): string | n
   return null;
 }
 
+function buildGooglePhotoUrl(photoReference: string, opts?: { maxWidth?: number }) {
+  const key = process.env.GOOGLE_PLACES_API_KEY;
+  if (!key) return null;
+  const maxWidth = opts?.maxWidth ?? 1200;
+  const url = new URL("https://maps.googleapis.com/maps/api/place/photo");
+  url.searchParams.set("maxwidth", String(maxWidth));
+  url.searchParams.set("photo_reference", photoReference);
+  url.searchParams.set("key", key);
+  return url.toString();
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -157,8 +216,125 @@ export async function registerRoutes(
 
   await ensureAppTables();
 
+  // Healthcheck endpoint (Render / UptimeRobot). Must be fast and not require auth.
+  app.get("/api/health", async (_req, res) => {
+    try {
+      if (!db) return res.status(200).json({ ok: true, db: false });
+      // lightweight DB probe (if DB is reachable, this resolves quickly)
+      await (db as any).execute(sql`select 1`);
+      return res.status(200).json({ ok: true, db: true });
+    } catch (e: any) {
+      return res.status(200).json({ ok: true, db: false, warn: String(e?.message || e) });
+    }
+  });
+
+  // Analytics: track a view for an establishment (public, no auth required).
+  // Mobile calls this when opening details.
+  app.post("/api/analytics/establishments/:id/view", asyncHandler(async (req, res) => {
+    if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    const id = String(req.params.id || "").trim();
+    if (!isUuidLike(id)) return res.status(400).json({ message: "Invalid id" });
+
+    const body = z
+      .object({
+        anonId: z.string().min(6).max(120).optional(),
+        source: z.string().min(0).max(80).optional(),
+      })
+      .safeParse(req.body);
+    if (!body.success) return res.status(400).json({ message: body.error.message });
+
+    const viewerUserId = req.session?.userId || null;
+    const anonId = body.data.anonId ? String(body.data.anonId) : null;
+    const source = body.data.source ? String(body.data.source) : null;
+    const userAgent = String(req.header("user-agent") || "").slice(0, 240) || null;
+
+    // Light de-dupe: if same viewer hits same establishment within 10 minutes, don't spam.
+    const since = new Date(Date.now() - 10 * 60 * 1000);
+    if (viewerUserId || anonId) {
+      const keyExpr = viewerUserId ? eq(establishmentViews.viewerUserId, String(viewerUserId)) : eq(establishmentViews.anonId, String(anonId));
+      const existing = await db
+        .select({ id: establishmentViews.id })
+        .from(establishmentViews)
+        .where(and(eq(establishmentViews.establishmentId, id as any), keyExpr, gte(establishmentViews.createdAt, since)))
+        .limit(1);
+      if (existing[0]?.id) return res.json({ ok: true, deduped: true });
+    }
+
+    await db.insert(establishmentViews).values({
+      establishmentId: id as any,
+      viewerUserId: viewerUserId ? String(viewerUserId) : null,
+      anonId,
+      source,
+      userAgent,
+    });
+
+    return res.json({ ok: true });
+  }));
+
+  // Pro dashboard statistics (requires establishment)
+  app.get("/api/pro/stats", requireAuth, requireEstablishment, asyncHandler(async (req, res) => {
+    if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    const userId = req.session.userId!;
+
+    const since7 = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const since30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const rows7 = await db.execute(sql`
+      select
+        count(*)::int as views,
+        count(distinct coalesce(${establishmentViews.viewerUserId}, ${establishmentViews.anonId}))::int as visitors
+      from ${establishmentViews}
+      join ${establishments} on ${establishments.id} = ${establishmentViews.establishmentId}
+      where ${establishments.ownerUserId} = ${userId}
+        and ${establishmentViews.createdAt} >= ${since7}
+    `);
+
+    const rows30 = await db.execute(sql`
+      select
+        count(*)::int as views,
+        count(distinct coalesce(${establishmentViews.viewerUserId}, ${establishmentViews.anonId}))::int as visitors
+      from ${establishmentViews}
+      join ${establishments} on ${establishments.id} = ${establishmentViews.establishmentId}
+      where ${establishments.ownerUserId} = ${userId}
+        and ${establishmentViews.createdAt} >= ${since30}
+    `);
+
+    const top = await db.execute(sql`
+      select
+        ${establishmentViews.establishmentId} as id,
+        max(${establishments.name}) as name,
+        count(*)::int as views,
+        count(distinct coalesce(${establishmentViews.viewerUserId}, ${establishmentViews.anonId}))::int as visitors
+      from ${establishmentViews}
+      join ${establishments} on ${establishments.id} = ${establishmentViews.establishmentId}
+      where ${establishments.ownerUserId} = ${userId}
+        and ${establishmentViews.createdAt} >= ${since30}
+      group by ${establishmentViews.establishmentId}
+      order by views desc
+      limit 10
+    `);
+
+    const r7 = (rows7 as any)?.rows?.[0] || { views: 0, visitors: 0 };
+    const r30 = (rows30 as any)?.rows?.[0] || { views: 0, visitors: 0 };
+    const topRows = ((top as any)?.rows || []) as any[];
+
+    return res.json({
+      range7d: { views: Number(r7.views || 0), visitors: Number(r7.visitors || 0) },
+      range30d: { views: Number(r30.views || 0), visitors: Number(r30.visitors || 0) },
+      topEstablishments: topRows.map((x) => ({
+        id: String(x.id),
+        name: String(x.name || ""),
+        views: Number(x.views || 0),
+        visitors: Number(x.visitors || 0),
+      })),
+    });
+  }));
+
   // R2 presign (browser uploads directly to Cloudflare R2 via PUT)
-  app.post("/api/business/photos/presign", async (req, res) => {
+  // Pro requirement: account required before any submission.
+  // Note: we keep this at requireAuth (not requireEstablishment) because it's also used
+  // by the "complete profile" step (avatar upload) before profileCompleted becomes true.
+  app.post("/api/business/photos/presign", requireAuth, async (req, res) => {
     const parsed = z
       .object({
         fileName: z.string().min(1).max(200),
@@ -178,12 +354,14 @@ export async function registerRoutes(
     return res.json(out);
   });
 
-  // Business application (public) — creates a pending request.
-  app.post("/api/business/apply", async (req, res) => {
+  // Business application — creates a pending request.
+  // Pro requirement: user must be logged in before submitting.
+  app.post("/api/business/apply", requireAuth, requireEstablishment, async (req, res) => {
     const parsed = businessApplySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
     if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
 
+    const userId = req.session.userId!;
     const { name, category, phone, description, photos, address, commune, lat, lng } = parsed.data;
     if (typeof lat === "number" || typeof lng === "number") {
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
@@ -199,6 +377,7 @@ export async function registerRoutes(
     const rows = await db
       .insert(businessApplications)
       .values({
+        userId,
         name,
         category,
         phone,
@@ -216,6 +395,18 @@ export async function registerRoutes(
       status: row.status,
       createdAt: row.createdAt,
     });
+  });
+
+  // Pro: list my business applications
+  app.get("/api/business/applications/me", requireAuth, async (req, res) => {
+    if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    const userId = req.session.userId!;
+    const rows = await db
+      .select()
+      .from(businessApplications)
+      .where(eq(businessApplications.userId, userId))
+      .orderBy(desc(businessApplications.createdAt));
+    return res.json({ applications: rows });
   });
 
   // Admin: list applications
@@ -275,6 +466,7 @@ export async function registerRoutes(
         lat,
         lng,
         sourceApplicationId: appRow.id,
+        ownerUserId: (appRow as any).userId ?? null,
         provider: null,
         providerPlaceId: null,
         published: true,
@@ -291,6 +483,7 @@ export async function registerRoutes(
           commune,
           lat,
           lng,
+          ownerUserId: (appRow as any).userId ?? null,
           published: true,
         },
       })
@@ -351,6 +544,14 @@ export async function registerRoutes(
           const address = r.vicinity || null;
           const commune = inferCommuneFromAddress(address);
 
+          const photoRefs = Array.isArray((r as any).photos) ? (r as any).photos : [];
+          const photoUrls = photoRefs
+            .map((p: any) => String(p?.photo_reference || ""))
+            .filter(Boolean)
+            .slice(0, 3)
+            .map((ref: string) => buildGooglePhotoUrl(ref, { maxWidth: 1200 }))
+            .filter(Boolean) as string[];
+
           const rows = await db
             .insert(establishments)
             .values({
@@ -360,6 +561,7 @@ export async function registerRoutes(
               commune,
               phone: null,
               description: null,
+              photos: photoUrls.length ? photoUrls : null,
               lat: r.geometry.location.lat,
               lng: r.geometry.location.lng,
               sourceApplicationId: null,
@@ -373,6 +575,8 @@ export async function registerRoutes(
                 name: r.name,
                 category,
                 address,
+                commune,
+                photos: photoUrls.length ? photoUrls : null,
                 lat: r.geometry.location.lat,
                 lng: r.geometry.location.lng,
                 published: true,
@@ -483,6 +687,7 @@ export async function registerRoutes(
   // Establishment: publish a place directly to the map (requires logged-in establishment profile)
   app.post("/api/establishments", requireAuth, requireEstablishment, async (req, res) => {
     if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    const userId = req.session.userId!;
 
     const parsed = z
       .object({
@@ -513,6 +718,7 @@ export async function registerRoutes(
         lat: data.lat,
         lng: data.lng,
         sourceApplicationId: null,
+        ownerUserId: userId,
         provider: "manual",
         providerPlaceId: null,
         published: true,
@@ -523,52 +729,351 @@ export async function registerRoutes(
     return res.status(201).json({ establishment: rows[0] });
   });
 
+  // Pro: list my establishments (owned)
+  app.get("/api/establishments/me", requireAuth, async (req, res) => {
+    if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    const userId = req.session.userId!;
+    const rows = await db
+      .select()
+      .from(establishments)
+      .where(eq(establishments.ownerUserId, userId))
+      .orderBy(desc(establishments.createdAt));
+    return res.json({ establishments: rows });
+  });
+
   // Public: fetch a single establishment (used by Details/Navigation when coming from DB)
-  app.get("/api/establishments/:id", async (req, res) => {
+  app.get("/api/establishments/:id", asyncHandler(async (req, res) => {
     if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
     const id = String(req.params.id);
+    // Safety: prevent UUID cast errors (e.g. "/api/establishments/me" accidentally hitting this route)
+    if (id === "me") return res.status(404).json({ message: "Not found" });
+    if (!isUuidLike(id)) return res.status(400).json({ message: "Invalid id" });
     const rows = await db.select().from(establishments).where(eq(establishments.id, id as any)).limit(1);
     const row = rows[0];
     if (!row) return res.status(404).json({ message: "Not found" });
     return res.json({ establishment: row });
-  });
+  }));
 
   app.get("/api/auth/me", async (req, res) => {
     const userId = req.session.userId;
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
     const user = await storage.getUser(userId);
     if (!user) return res.status(401).json({ message: "Unauthorized" });
+    if ((user as any).deletedAt) return res.status(401).json({ message: "Unauthorized" });
     return res.json({ user: safeUser(user) });
   });
 
+  // Email verification link (clicked from mailbox)
+  app.get("/api/auth/verify-email", asyncHandler(async (req, res) => {
+    if (!db) return res.status(500).send("DATABASE_URL not configured");
+    const token = String(req.query.token || "").trim();
+    if (!token) return res.status(400).send("Missing token");
+
+    const rows = await db.select().from(users).where(eq(users.emailVerificationToken, token)).limit(1);
+    const u = rows[0] as any;
+    if (!u) return res.status(400).send("Invalid or expired token");
+
+    await db
+      .update(users)
+      .set({ emailVerified: true, emailVerificationToken: null, emailVerificationSentAt: null })
+      .where(eq(users.id, u.id));
+
+    // Simple confirmation page (works in mobile browser too)
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return res.status(200).send(`
+      <html><head><meta name="viewport" content="width=device-width, initial-scale=1"/></head>
+      <body style="font-family:system-ui; padding:24px;">
+        <h2>Email confirmé ✅</h2>
+        <p>Vous pouvez revenir dans l’application et continuer sur l’espace Pro.</p>
+      </body></html>
+    `);
+  }));
+
   app.post("/api/auth/register", async (req, res) => {
-    const parsed = insertUserSchema.safeParse(req.body);
+    if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    // We accept {username,password} for backwards compatibility, but we require username to be an email
+    // so we can send a confirmation email.
+    const parsed = z
+      .object({
+        username: z.string().min(3).max(200),
+        password: z.string().min(6).max(200),
+      })
+      .safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
     const { username, password } = parsed.data;
+    const email = String(username).trim().toLowerCase();
+    if (!looksLikeEmail(email)) return res.status(400).json({ message: "Email invalide (utilise un email comme identifiant)." });
 
-    const existing = await storage.getUserByUsername(username);
+    const existing = await storage.getUserByUsername(email);
     if (existing) return res.status(409).json({ message: "Username already exists" });
 
     const user = await storage.createUser({
-      username,
+      username: email,
+      email,
       password: await hashPassword(password),
     });
+    const token = makeToken(24);
+    await db
+      .update(users)
+      .set({ emailVerified: false, emailVerificationToken: token, emailVerificationSentAt: new Date() })
+      .where(eq(users.id, user.id));
+
+    // Send verification email (best effort)
+    try {
+      const baseUrl =
+        String(process.env.PUBLIC_API_URL || "").trim() ||
+        `${req.protocol}://${req.get("host")}`;
+      const link = `${baseUrl.replace(/\/+$/, "")}/api/auth/verify-email?token=${encodeURIComponent(token)}`;
+      await resendSendEmail({
+        from: "mapper-oshow@binarysecurity.com",
+        to: email,
+        subject: "Confirme ton email — O'Show",
+        html: `
+          <div style="font-family:system-ui; line-height:1.5">
+            <h2>Bienvenue sur O'Show</h2>
+            <p>Confirme ton email pour activer l’espace Pro :</p>
+            <p><a href="${link}">Confirmer mon email</a></p>
+            <p style="color:#64748b; font-size:12px">Si le bouton ne marche pas, copie/colle: ${link}</p>
+          </div>
+        `,
+      });
+    } catch (e: any) {
+      console.warn("[Resend] email verification failed:", e?.message || e);
+      // Don't block registration.
+    }
     req.session.userId = user.id;
-    return res.status(201).json({ user: safeUser(user) });
+    const updated = await storage.getUser(user.id);
+    return res.status(201).json({ user: safeUser(updated) });
   });
 
   app.post("/api/auth/login", async (req, res) => {
-    const parsed = insertUserSchema.safeParse(req.body);
+    const parsed = z
+      .object({
+        username: z.string().min(3).max(200),
+        password: z.string().min(6).max(200),
+      })
+      .safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
     const { username, password } = parsed.data;
+    const login = String(username).trim().toLowerCase();
 
-    const user = await storage.getUserByUsername(username);
+    const user = await storage.getUserByUsername(login);
     if (!user) return res.status(401).json({ message: "Invalid credentials" });
+    if ((user as any).deletedAt) return res.status(403).json({ message: "Compte supprimé." });
     const ok = await verifyPassword(password, user.password);
     if (!ok) return res.status(401).json({ message: "Invalid credentials" });
     req.session.userId = user.id;
     return res.json({ user: safeUser(user) });
   });
+
+  // Password reset (request) - generates a short code and sends it with Resend.
+  app.post("/api/auth/request-password-reset", asyncHandler(async (req, res) => {
+    if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    const parsed = z.object({ email: z.string().min(3).max(200) }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    const email = String(parsed.data.email).trim().toLowerCase();
+    if (!looksLikeEmail(email)) return res.status(200).json({ ok: true });
+
+    // Always return ok (avoid user enumeration).
+    const rows = await db.select().from(users).where(eq(users.username, email)).limit(1);
+    const u = rows[0] as any;
+    if (!u || u.deletedAt) return res.json({ ok: true });
+
+    // Anti-spam: 1 reset / 60s
+    const last = u.passwordResetSentAt ? Date.parse(String(u.passwordResetSentAt)) : 0;
+    if (last && Date.now() - last < 60_000) return res.json({ ok: true });
+
+    const code = String(Math.floor(100000 + Math.random() * 900000)); // 6 digits
+    await db
+      .update(users)
+      .set({ passwordResetCode: code, passwordResetSentAt: new Date() })
+      .where(eq(users.id, u.id));
+
+    try {
+      await resendSendEmail({
+        from: "mapper-oshow@binarysecurity.com",
+        to: email,
+        subject: "Réinitialiser ton mot de passe — O'Show",
+        html: `
+          <div style="font-family:system-ui; line-height:1.5">
+            <h2>Réinitialisation du mot de passe</h2>
+            <p>Voici ton code (valable ~15 minutes) :</p>
+            <p style="font-size:24px; font-weight:800; letter-spacing:2px">${code}</p>
+            <p>Dans l’application, ouvre Settings → Mot de passe puis saisis ce code.</p>
+          </div>
+        `,
+      });
+    } catch (e: any) {
+      console.warn("[Resend] password reset failed:", e?.message || e);
+      return res.status(503).json({
+        message:
+          "Service email indisponible. Vérifie RESEND_KEY_API sur le backend et que le domaine d'envoi est validé dans Resend.",
+      });
+    }
+    return res.json({ ok: true });
+  }));
+
+  // Password reset (confirm) - user provides email + code + new password.
+  app.post("/api/auth/reset-password", asyncHandler(async (req, res) => {
+    if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    const parsed = z
+      .object({
+        email: z.string().min(3).max(200),
+        code: z.string().min(4).max(12),
+        newPassword: z.string().min(6).max(200),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    const email = String(parsed.data.email).trim().toLowerCase();
+    const code = String(parsed.data.code).trim();
+    const newPassword = parsed.data.newPassword;
+    if (!looksLikeEmail(email)) return res.status(400).json({ message: "Email invalide" });
+
+    const rows = await db.select().from(users).where(eq(users.username, email)).limit(1);
+    const u = rows[0] as any;
+    if (!u || u.deletedAt) return res.status(400).json({ message: "Code invalide" });
+
+    const sentAt = u.passwordResetSentAt ? Date.parse(String(u.passwordResetSentAt)) : 0;
+    if (!u.passwordResetCode || !sentAt) return res.status(400).json({ message: "Code invalide" });
+    if (Date.now() - sentAt > 15 * 60_000) return res.status(400).json({ message: "Code expiré" });
+    if (String(u.passwordResetCode) !== code) return res.status(400).json({ message: "Code invalide" });
+
+    await db
+      .update(users)
+      .set({ password: await hashPassword(newPassword), passwordResetCode: null, passwordResetSentAt: null })
+      .where(eq(users.id, u.id));
+
+    try {
+      await resendSendEmail({
+        from: "mapper-oshow@binarysecurity.com",
+        to: email,
+        subject: "Mot de passe modifié — O'Show",
+        html: `<div style="font-family:system-ui; line-height:1.5"><h2>Mot de passe modifié ✅</h2><p>Si ce n’est pas toi, contacte le support immédiatement.</p></div>`,
+      });
+    } catch (e: any) {
+      console.warn("[Resend] password change notice failed:", e?.message || e);
+    }
+    return res.json({ ok: true });
+  }));
+
+  // Change password (logged-in)
+  app.post("/api/auth/change-password", requireAuth, asyncHandler(async (req, res) => {
+    if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    const userId = req.session.userId!;
+    const parsed = z
+      .object({
+        currentPassword: z.string().min(6).max(200),
+        newPassword: z.string().min(6).max(200),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+
+    const u = await storage.getUser(userId);
+    if (!u) return res.status(401).json({ message: "Unauthorized" });
+    if ((u as any).deletedAt) return res.status(403).json({ message: "Compte supprimé." });
+    const ok = await verifyPassword(parsed.data.currentPassword, (u as any).password);
+    if (!ok) return res.status(400).json({ message: "Mot de passe actuel invalide" });
+
+    await db.update(users).set({ password: await hashPassword(parsed.data.newPassword) }).where(eq(users.id, userId));
+    const email = String((u as any).email || (u as any).username || "").trim().toLowerCase();
+    if (email && looksLikeEmail(email)) {
+      try {
+        await resendSendEmail({
+          from: "mapper-oshow@binarysecurity.com",
+          to: email,
+          subject: "Mot de passe modifié — O'Show",
+          html: `<div style="font-family:system-ui; line-height:1.5"><h2>Mot de passe modifié ✅</h2><p>Si ce n’est pas toi, contacte le support immédiatement.</p></div>`,
+        });
+      } catch (e: any) {
+        console.warn("[Resend] password change notice failed:", e?.message || e);
+      }
+    }
+    return res.json({ ok: true });
+  }));
+
+  // Delete account (soft delete)
+  app.post("/api/auth/delete-account", requireAuth, asyncHandler(async (req, res) => {
+    if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    const userId = req.session.userId!;
+    const parsed = z.object({ confirm: z.literal("DELETE") }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: "Confirmation requise" });
+
+    const u = await storage.getUser(userId);
+    if (!u) return res.status(401).json({ message: "Unauthorized" });
+    if ((u as any).deletedAt) return res.json({ ok: true, already: true });
+
+    await db.update(users).set({ deletedAt: new Date() }).where(eq(users.id, userId));
+    const email = String((u as any).email || (u as any).username || "").trim().toLowerCase();
+    if (email && looksLikeEmail(email)) {
+      try {
+        await resendSendEmail({
+          from: "mapper-oshow@binarysecurity.com",
+          to: email,
+          subject: "Compte supprimé — O'Show",
+          html: `<div style="font-family:system-ui; line-height:1.5"><h2>Votre compte a été supprimé</h2><p>Si ce n’est pas vous, contactez le support immédiatement.</p></div>`,
+        });
+      } catch (e: any) {
+        console.warn("[Resend] delete notice failed:", e?.message || e);
+      }
+    }
+
+    req.session.destroy(() => {
+      res.clearCookie("connect.sid");
+      res.json({ ok: true });
+    });
+  }));
+
+  // Resend verification email (Pro onboarding helper)
+  app.post("/api/auth/resend-verification", requireAuth, asyncHandler(async (req, res) => {
+    if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    const userId = req.session.userId!;
+    const rowsUser = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const u = rowsUser[0] as any;
+    if (!u) return res.status(401).json({ message: "Unauthorized" });
+    const email = String(u.email || u.username || "").trim().toLowerCase();
+    if (!email || !looksLikeEmail(email)) return res.status(400).json({ message: "Email invalide sur le compte." });
+    if (u.emailVerified) return res.json({ ok: true, alreadyVerified: true });
+
+    // Basic anti-spam: 1 email / 60s
+    const last = u.emailVerificationSentAt ? Date.parse(String(u.emailVerificationSentAt)) : 0;
+    if (last && Date.now() - last < 60_000) {
+      return res.status(429).json({ message: "Veuillez patienter avant de renvoyer l’email." });
+    }
+
+    const token = makeToken(24);
+    await db
+      .update(users)
+      .set({ emailVerified: false, emailVerificationToken: token, emailVerificationSentAt: new Date() })
+      .where(eq(users.id, userId));
+
+    const baseUrl =
+      String(process.env.PUBLIC_API_URL || "").trim() ||
+      `${req.protocol}://${req.get("host")}`;
+    const link = `${baseUrl.replace(/\/+$/, "")}/api/auth/verify-email?token=${encodeURIComponent(token)}`;
+    try {
+      await resendSendEmail({
+        from: "mapper-oshow@binarysecurity.com",
+        to: email,
+        subject: "Confirme ton email — O'Show",
+        html: `
+          <div style="font-family:system-ui; line-height:1.5">
+            <h2>Confirmer l’email</h2>
+            <p>Clique ici :</p>
+            <p><a href="${link}">Confirmer mon email</a></p>
+            <p style="color:#64748b; font-size:12px">Si le bouton ne marche pas, copie/colle: ${link}</p>
+          </div>
+        `,
+      });
+    } catch (e: any) {
+      console.warn("[Resend] email verification resend failed:", e?.message || e);
+      return res.status(503).json({
+        message:
+          "Service email indisponible. Vérifie RESEND_KEY_API sur le backend et que mapper-oshow@binarysecurity.com est autorisé dans Resend.",
+      });
+    }
+
+    return res.json({ ok: true });
+  }));
 
   app.post("/api/auth/logout", requireAuth, (req, res) => {
     req.session.destroy(() => {
@@ -590,26 +1095,42 @@ export async function registerRoutes(
     const userId = req.session.userId!;
     const parsed = upsertEstablishmentProfileSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
-    const { name, category, address, phone, description } = parsed.data;
+    const { ownerFirstName, ownerLastName, name, category, address, phone, lat, lng, description, avatarUrl, instagram, whatsapp, website } = parsed.data;
 
     const rows = await db
       .insert(establishmentProfiles)
       .values({
         userId,
+        ownerFirstName: ownerFirstName || null,
+        ownerLastName: ownerLastName || null,
         name,
         category,
         address: address || null,
         phone: phone || null,
+        lat: typeof lat === "number" ? lat : null,
+        lng: typeof lng === "number" ? lng : null,
         description: description || null,
+        avatarUrl: avatarUrl || null,
+        instagram: instagram || null,
+        whatsapp: whatsapp || null,
+        website: website || null,
       })
       .onConflictDoUpdate({
         target: establishmentProfiles.userId,
         set: {
+          ownerFirstName: ownerFirstName || null,
+          ownerLastName: ownerLastName || null,
           name,
           category,
           address: address || null,
           phone: phone || null,
+          lat: typeof lat === "number" ? lat : null,
+          lng: typeof lng === "number" ? lng : null,
           description: description || null,
+          avatarUrl: avatarUrl || null,
+          instagram: instagram || null,
+          whatsapp: whatsapp || null,
+          website: website || null,
         },
       })
       .returning();
@@ -617,6 +1138,339 @@ export async function registerRoutes(
     await db.update(users).set({ role: "establishment", profileCompleted: true }).where(eq(users.id, userId));
     const updatedUser = await storage.getUser(userId);
     return res.json({ user: safeUser(updatedUser), profile: rows[0] });
+  });
+
+  // Events (public)
+  app.get("/api/events", async (req, res) => {
+    if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+    const radiusKm = Math.min(250, Math.max(1, Number(req.query.radiusKm || 10)));
+    const withinHours = Math.min(168, Math.max(1, Number(req.query.withinHours || 72)));
+    const limit = Math.min(2000, Math.max(1, Number(req.query.limit || 300)));
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return res.status(400).json({ message: "lat/lng are required" });
+    }
+
+    const now = new Date();
+    const end = new Date(Date.now() + withinHours * 60 * 60 * 1000);
+    const origin = { lat, lng };
+    const radiusM = radiusKm * 1000;
+
+    // Basic join to include establishment data; we'll filter by distance in JS like establishments endpoint.
+    const rows = await db
+      .select({
+        ev: events,
+        est: establishments,
+        prof: establishmentProfiles,
+        user: users,
+      })
+      .from(events)
+      .leftJoin(establishments, eq(events.establishmentId, establishments.id))
+      .leftJoin(establishmentProfiles, eq(events.userId, establishmentProfiles.userId))
+      .leftJoin(users, eq(events.userId, users.id))
+      .where(
+        and(
+          eq(events.published, true),
+          gte(events.startsAt, now),
+          lte(events.startsAt, end),
+          eq(establishments.published, true),
+        ),
+      )
+      .orderBy(events.startsAt)
+      .limit(Math.min(6000, limit * 8));
+
+    const out = rows
+      .filter((r) => r.est && Number.isFinite((r.est as any).lat) && Number.isFinite((r.est as any).lng))
+      .map((r) => {
+        const est = r.est as any;
+        const dist = haversineMeters(origin, { lat: est.lat, lng: est.lng });
+        return {
+          ...r.ev,
+          distanceMeters: dist,
+          establishment: est,
+          organizer: {
+            userId: String((r.user as any)?.id || r.ev.userId),
+            name: String((r.prof as any)?.name || (r.user as any)?.username || "Organisateur"),
+            avatarUrl: (r.prof as any)?.avatarUrl || null,
+          },
+        };
+      })
+      .filter((x) => x.distanceMeters <= radiusM)
+      .sort((a, b) => a.distanceMeters - b.distanceMeters)
+      .slice(0, limit);
+
+    return res.json({ events: out });
+  });
+
+  // Events (pro): my events
+  app.get("/api/events/me", requireAuth, async (req, res) => {
+    if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    const userId = req.session.userId!;
+    const rows = await db
+      .select({
+        ev: events,
+        est: establishments,
+      })
+      .from(events)
+      .leftJoin(establishments, eq(events.establishmentId, establishments.id))
+      .where(eq(events.userId, userId))
+      .orderBy(desc(events.createdAt))
+      .limit(500);
+    return res.json({
+      events: rows.map((r) => ({ ...r.ev, establishment: r.est })),
+    });
+  });
+
+  // Events (pro): create event (requires establishment profile + ownership)
+  app.post("/api/events", requireAuth, requireEstablishment, async (req, res) => {
+    if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    const userId = req.session.userId!;
+    const parsed = z
+      .object({
+        establishmentId: z.string().uuid(),
+        title: z.string().min(3).max(140),
+        category: z.string().min(2).max(40).default("event"),
+        startsAt: z.string().datetime(),
+        endsAt: z.string().datetime().optional(),
+        description: z.string().max(800).optional(),
+        coverUrl: z.string().url().max(500).optional(),
+        photos: z.array(z.string().url().max(500)).max(10).optional(),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+
+    const estId = parsed.data.establishmentId;
+    const estRows = await db.select().from(establishments).where(eq(establishments.id, estId as any)).limit(1);
+    const est = estRows[0] as any;
+    if (!est) return res.status(404).json({ message: "Establishment not found" });
+    if (String(est.ownerUserId || "") !== String(userId)) {
+      return res.status(403).json({ message: "Not allowed for this establishment" });
+    }
+
+    const rows = await db
+      .insert(events)
+      .values({
+        userId,
+        establishmentId: estId as any,
+        title: parsed.data.title,
+        category: parsed.data.category,
+        startsAt: new Date(parsed.data.startsAt),
+        endsAt: parsed.data.endsAt ? new Date(parsed.data.endsAt) : null,
+        description: parsed.data.description ?? null,
+        coverUrl: parsed.data.coverUrl ?? null,
+        photos: parsed.data.photos?.length ? parsed.data.photos : null,
+        // Moderation: admin must approve before public listing
+        published: false,
+      })
+      .returning();
+    return res.status(201).json({ event: rows[0] });
+  });
+
+  // User events (public): nearby meetups / parties
+  app.get("/api/user-events", async (req, res) => {
+    if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+    const radiusKm = Math.min(250, Math.max(1, Number(req.query.radiusKm || 10)));
+    const withinHours = Math.min(168, Math.max(1, Number(req.query.withinHours || 72)));
+    const limit = Math.min(2000, Math.max(1, Number(req.query.limit || 300)));
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return res.status(400).json({ message: "lat/lng are required" });
+    }
+
+    const now = new Date();
+    const end = new Date(Date.now() + withinHours * 60 * 60 * 1000);
+    const origin = { lat, lng };
+    const radiusM = radiusKm * 1000;
+
+    const rows = await db
+      .select({
+        ue: userEvents,
+        user: users,
+      })
+      .from(userEvents)
+      .leftJoin(users, eq(userEvents.userId, users.id))
+      .where(and(eq(userEvents.published, true), gte(userEvents.startsAt, now), lte(userEvents.startsAt, end)))
+      .orderBy(userEvents.startsAt)
+      .limit(Math.min(6000, limit * 8));
+
+    const out = rows
+      .map((r) => {
+        const ue = r.ue as any;
+        const dist = haversineMeters(origin, { lat: ue.lat, lng: ue.lng });
+        return {
+          ...ue,
+          distanceMeters: dist,
+          organizer: {
+            userId: String((r.user as any)?.id || ue.userId),
+            name: String((r.user as any)?.username || "Utilisateur"),
+          },
+        };
+      })
+      .filter((x) => x.distanceMeters <= radiusM)
+      .sort((a, b) => a.distanceMeters - b.distanceMeters)
+      .slice(0, limit);
+
+    return res.json({ userEvents: out });
+  });
+
+  // User events (private): my meetups
+  app.get("/api/user-events/me", requireAuth, async (req, res) => {
+    if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    const userId = req.session.userId!;
+    const rows = await db.select().from(userEvents).where(eq(userEvents.userId, userId)).orderBy(desc(userEvents.createdAt)).limit(500);
+    return res.json({ userEvents: rows });
+  });
+
+  // User events (private): create
+  app.post("/api/user-events", requireAuth, requireVerifiedEmail, async (req, res) => {
+    if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    const userId = req.session.userId!;
+    const parsed = z
+      .object({
+        kind: z.enum(["party", "meet"]).default("party"),
+        title: z.string().min(3).max(140),
+        startsAt: z.string().datetime(),
+        endsAt: z.string().datetime().optional(),
+        description: z.string().max(800).optional(),
+        lat: z.number(),
+        lng: z.number(),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    const rows = await db
+      .insert(userEvents)
+      .values({
+        userId,
+        kind: parsed.data.kind,
+        title: parsed.data.title,
+        startsAt: new Date(parsed.data.startsAt),
+        endsAt: parsed.data.endsAt ? new Date(parsed.data.endsAt) : null,
+        description: parsed.data.description ?? null,
+        lat: parsed.data.lat,
+        lng: parsed.data.lng,
+        // Moderation: admin must approve before public listing
+        published: false,
+      })
+      .returning();
+    return res.status(201).json({ userEvent: rows[0] });
+  });
+
+  // Admin moderation endpoints (token-based)
+  app.get(
+    "/api/admin/moderation/pending",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+      if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+      const limit = Math.min(500, Math.max(1, Number(req.query.limit || 200)));
+
+      const pendingEvents = await db
+        .select({
+          ev: events,
+          est: establishments,
+          prof: establishmentProfiles,
+          user: users,
+        })
+        .from(events)
+        .leftJoin(establishments, eq(events.establishmentId, establishments.id))
+        .leftJoin(establishmentProfiles, eq(events.userId, establishmentProfiles.userId))
+        .leftJoin(users, eq(events.userId, users.id))
+        .where(eq(events.published, false))
+        .orderBy(desc(events.createdAt))
+        .limit(limit);
+
+      const pendingUserEvents = await db
+        .select({
+          ue: userEvents,
+          user: users,
+        })
+        .from(userEvents)
+        .leftJoin(users, eq(userEvents.userId, users.id))
+        .where(eq(userEvents.published, false))
+        .orderBy(desc(userEvents.createdAt))
+        .limit(limit);
+
+      return res.json({
+        pending: {
+          events: pendingEvents.map((r: any) => ({
+            ...r.ev,
+            establishment: r.est || null,
+            organizer: {
+              userId: String(r.user?.id || r.ev.userId),
+              name: String(r.prof?.name || r.user?.username || "Organisateur"),
+              avatarUrl: r.prof?.avatarUrl || null,
+            },
+          })),
+          userEvents: pendingUserEvents.map((r: any) => ({
+            ...r.ue,
+            organizer: { userId: String(r.user?.id || r.ue.userId), name: String(r.user?.username || "Utilisateur") },
+          })),
+        },
+      });
+    }),
+  );
+
+  app.post(
+    "/api/admin/events/:id/approve",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+      if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+      const id = String(req.params.id || "").trim();
+      if (!isUuidLike(id)) return res.status(400).json({ message: "Invalid id" });
+      await db.update(events).set({ published: true }).where(eq(events.id, id as any));
+      return res.json({ ok: true });
+    }),
+  );
+
+  app.post(
+    "/api/admin/user-events/:id/approve",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+      if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+      const id = String(req.params.id || "").trim();
+      if (!isUuidLike(id)) return res.status(400).json({ message: "Invalid id" });
+      await db.update(userEvents).set({ published: true }).where(eq(userEvents.id, id as any));
+      return res.json({ ok: true });
+    }),
+  );
+
+  app.post(
+    "/api/admin/events/:id/reject",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+      if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+      const id = String(req.params.id || "").trim();
+      if (!isUuidLike(id)) return res.status(400).json({ message: "Invalid id" });
+      await db.delete(events).where(eq(events.id, id as any));
+      return res.json({ ok: true });
+    }),
+  );
+
+  app.post(
+    "/api/admin/user-events/:id/reject",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+      if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+      const id = String(req.params.id || "").trim();
+      if (!isUuidLike(id)) return res.status(400).json({ message: "Invalid id" });
+      await db.delete(userEvents).where(eq(userEvents.id, id as any));
+      return res.json({ ok: true });
+    }),
+  );
+
+  // User events (private): delete
+  app.delete("/api/user-events/:id", requireAuth, requireVerifiedEmail, async (req, res) => {
+    if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    const userId = req.session.userId!;
+    const id = String(req.params.id || "").trim();
+    if (!isUuidLike(id)) return res.status(400).json({ message: "Invalid id" });
+    const rows = await db.select().from(userEvents).where(eq(userEvents.id, id as any)).limit(1);
+    const ue = rows[0] as any;
+    if (!ue) return res.json({ ok: true });
+    if (String(ue.userId || "") !== String(userId)) return res.status(403).json({ message: "Not allowed" });
+    await db.delete(userEvents).where(eq(userEvents.id, id as any));
+    return res.json({ ok: true });
   });
 
   return httpServer;

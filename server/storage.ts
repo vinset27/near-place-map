@@ -32,6 +32,7 @@ export class DbStorage implements IStorage {
       .insert(users)
       .values({
         username: insertUser.username,
+        email: (insertUser as any).email ?? null,
         password: insertUser.password,
       })
       .returning();

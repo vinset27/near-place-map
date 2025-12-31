@@ -10,12 +10,41 @@ export const db = pool ? drizzle(pool) : null;
 export async function ensureAppTables() {
   if (!pool) return;
 
+  // Users table (auth) - some DBs already have it; keep it defensive.
+  await pool.query(`
+    create table if not exists users (
+      id varchar primary key default gen_random_uuid(),
+      username text not null unique,
+      email text,
+      password text not null,
+      role text not null default 'user',
+      profile_completed boolean not null default false,
+      email_verified boolean not null default false,
+      email_verification_token text,
+      email_verification_sent_at timestamptz,
+      password_reset_code text,
+      password_reset_sent_at timestamptz,
+      deleted_at timestamptz,
+      created_at timestamp not null default now()
+    );
+  `);
+  await pool.query(`alter table users add column if not exists email text;`);
+  await pool.query(`alter table users add column if not exists email_verified boolean not null default false;`);
+  await pool.query(`alter table users add column if not exists email_verification_token text;`);
+  await pool.query(`alter table users add column if not exists email_verification_sent_at timestamptz;`);
+  await pool.query(`alter table users add column if not exists password_reset_code text;`);
+  await pool.query(`alter table users add column if not exists password_reset_sent_at timestamptz;`);
+  await pool.query(`alter table users add column if not exists deleted_at timestamptz;`);
+  // Unique email (allows multiple NULLs)
+  await pool.query(`create unique index if not exists users_email_uidx on users (email);`);
+
   // Existing table (kept for safety if DB is empty).
   await pool.query(`
     create table if not exists business_applications (
       id uuid primary key default gen_random_uuid(),
       created_at timestamptz not null default now(),
       status text not null default 'pending',
+      user_id varchar,
       name text not null,
       category text not null,
       phone text not null,
@@ -33,17 +62,34 @@ export async function ensureAppTables() {
   await pool.query(`alter table business_applications add column if not exists commune text;`);
   await pool.query(`alter table business_applications add column if not exists lat double precision;`);
   await pool.query(`alter table business_applications add column if not exists lng double precision;`);
+  await pool.query(`alter table business_applications add column if not exists user_id varchar;`);
 
   await pool.query(`
     create table if not exists establishment_profiles (
       user_id varchar primary key,
+      owner_first_name text,
+      owner_last_name text,
       name text not null,
       category text not null,
       address text,
       phone text,
-      description text
+      lat double precision,
+      lng double precision,
+      description text,
+      avatar_url text,
+      instagram text,
+      whatsapp text,
+      website text
     );
   `);
+  await pool.query(`alter table establishment_profiles add column if not exists owner_first_name text;`);
+  await pool.query(`alter table establishment_profiles add column if not exists owner_last_name text;`);
+  await pool.query(`alter table establishment_profiles add column if not exists avatar_url text;`);
+  await pool.query(`alter table establishment_profiles add column if not exists instagram text;`);
+  await pool.query(`alter table establishment_profiles add column if not exists whatsapp text;`);
+  await pool.query(`alter table establishment_profiles add column if not exists website text;`);
+  await pool.query(`alter table establishment_profiles add column if not exists lat double precision;`);
+  await pool.query(`alter table establishment_profiles add column if not exists lng double precision;`);
 
   // Needed for ON CONFLICT (user_id) DO UPDATE to work even if DB was created without PK/unique.
   await pool.query(`
@@ -66,6 +112,7 @@ export async function ensureAppTables() {
       lat double precision not null,
       lng double precision not null,
       source_application_id uuid,
+      owner_user_id varchar,
       provider text,
       provider_place_id text,
       published boolean not null default true
@@ -77,6 +124,7 @@ export async function ensureAppTables() {
   await pool.query(`alter table establishments add column if not exists provider_place_id text;`);
   await pool.query(`alter table establishments add column if not exists source_application_id uuid;`);
   await pool.query(`alter table establishments add column if not exists photos text[];`);
+  await pool.query(`alter table establishments add column if not exists owner_user_id varchar;`);
 
   // Avoid duplicates for imported providers (google place_id).
   // Use a real UNIQUE constraint so `ON CONFLICT (provider, provider_place_id)` always matches.
@@ -110,6 +158,69 @@ export async function ensureAppTables() {
       end if;
     end$$;
   `);
+
+  // Events table (Pro)
+  await pool.query(`
+    create table if not exists events (
+      id uuid primary key default gen_random_uuid(),
+      created_at timestamptz not null default now(),
+      user_id varchar not null,
+      establishment_id uuid not null,
+      title text not null,
+      category text not null default 'event',
+      starts_at timestamptz not null,
+      ends_at timestamptz,
+      description text,
+      cover_url text,
+      photos text[],
+      published boolean not null default false
+    );
+  `);
+  // Ensure moderation default even if table existed before.
+  await pool.query(`alter table events alter column published set default false;`);
+
+  await pool.query(`create index if not exists events_starts_at_idx on events (starts_at);`);
+  await pool.query(`create index if not exists events_establishment_id_idx on events (establishment_id);`);
+  await pool.query(`create index if not exists events_user_id_idx on events (user_id);`);
+
+  // User events table (public meetups)
+  await pool.query(`
+    create table if not exists user_events (
+      id uuid primary key default gen_random_uuid(),
+      created_at timestamptz not null default now(),
+      user_id varchar not null,
+      kind text not null default 'party',
+      title text not null,
+      starts_at timestamptz not null,
+      ends_at timestamptz,
+      description text,
+      lat double precision not null,
+      lng double precision not null,
+      published boolean not null default false
+    );
+  `);
+  // Ensure moderation default even if table existed before.
+  await pool.query(`alter table user_events alter column published set default false;`);
+  await pool.query(`create index if not exists user_events_starts_at_idx on user_events (starts_at);`);
+  await pool.query(`create index if not exists user_events_user_id_idx on user_events (user_id);`);
+  await pool.query(`create index if not exists user_events_lat_lng_idx on user_events (lat, lng);`);
+
+  // Analytics table: establishment views
+  await pool.query(`
+    create table if not exists establishment_views (
+      id uuid primary key default gen_random_uuid(),
+      created_at timestamptz not null default now(),
+      establishment_id uuid not null,
+      viewer_user_id varchar,
+      anon_id text,
+      source text,
+      user_agent text
+    );
+  `);
+  await pool.query(`create index if not exists establishment_views_establishment_id_idx on establishment_views (establishment_id);`);
+  await pool.query(`create index if not exists establishment_views_created_at_idx on establishment_views (created_at);`);
+  await pool.query(`create index if not exists establishment_views_viewer_user_id_idx on establishment_views (viewer_user_id);`);
+  await pool.query(`create index if not exists establishment_views_anon_id_idx on establishment_views (anon_id);`);
 }
 
 

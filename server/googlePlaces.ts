@@ -4,6 +4,12 @@ type NearbySearchResponse = {
     name: string;
     vicinity?: string;
     types?: string[];
+    photos?: Array<{
+      photo_reference?: string;
+      height?: number;
+      width?: number;
+      html_attributions?: string[];
+    }>;
     geometry?: { location?: { lat: number; lng: number } };
   }>;
   next_page_token?: string;

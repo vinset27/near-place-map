@@ -1,0 +1,74 @@
+{
+  "expo": {
+    "name": "O'Show",
+    "slug": "oshow-nearplace",
+    "version": "1.0.0",
+    "platforms": ["ios", "android"],
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "oshow",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#2563eb"
+    },
+    "notification": {
+      "icon": "./assets/icon.png",
+      "color": "#2563eb"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.nearplace.oshow",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "O'Show utilise votre position pour vous montrer les établissements à proximité.",
+        "NSLocationAlwaysUsageDescription": "O'Show utilise votre position pour vous guider vers votre destination."
+      },
+      "config": {
+        "googleMapsApiKey": "VOTRE_GOOGLE_MAPS_API_KEY_IOS"
+      }
+    },
+    "android": {
+      "package": "com.nearplace.oshow",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#2563eb"
+      },
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "POST_NOTIFICATIONS"
+      ],
+      "config": {
+        "googleMaps": {
+          "apiKey": "VOTRE_GOOGLE_MAPS_API_KEY_ANDROID"
+        }
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-notifications",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "O'Show utilise votre position pour vous montrer les établissements à proximité et vous guider."
+        }
+      ]
+    ],
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "YOUR_EAS_PROJECT_ID"
+      }
+    }
+  }
+}
