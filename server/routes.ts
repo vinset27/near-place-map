@@ -1002,13 +1002,20 @@ export async function registerRoutes(
     if (!looksLikeEmail(email)) return res.status(200).json({ ok: true });
 
     // Always return ok (avoid user enumeration).
+    console.log(`[PasswordReset] request: email=${email}`);
     const rows = await db.select().from(users).where(eq(users.username, email)).limit(1);
     const u = rows[0] as any;
-    if (!u || u.deletedAt) return res.json({ ok: true });
+    if (!u || u.deletedAt) {
+      console.log(`[PasswordReset] request: user_not_found_or_deleted email=${email}`);
+      return res.json({ ok: true });
+    }
 
     // Anti-spam: 1 reset / 60s
     const last = u.passwordResetSentAt ? Date.parse(String(u.passwordResetSentAt)) : 0;
-    if (last && Date.now() - last < 60_000) return res.json({ ok: true });
+    if (last && Date.now() - last < 60_000) {
+      console.log(`[PasswordReset] request: throttled email=${email}`);
+      return res.json({ ok: true });
+    }
 
     const code = String(Math.floor(100000 + Math.random() * 900000)); // 6 digits
     await db
