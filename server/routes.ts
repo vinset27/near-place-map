@@ -19,7 +19,7 @@ import {
 import { hashPassword, verifyPassword } from "./auth";
 import { db, ensureAppTables } from "./db";
 import { pool } from "./db";
-import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { presignBusinessPhotoPut } from "./r2";
 import { googlePlacesNearbyAll, mapGoogleTypesToCategory } from "./googlePlaces";
@@ -929,8 +929,13 @@ export async function registerRoutes(
     const email = String(username).trim().toLowerCase();
     if (!looksLikeEmail(email)) return res.status(400).json({ message: "Email invalide (utilise un email comme identifiant)." });
 
-    const existing = await storage.getUserByUsername(email);
-    if (existing) return res.status(409).json({ message: "Username already exists" });
+    // Check both username and email (some older accounts may have username != email but email filled).
+    const existingRows = await db
+      .select()
+      .from(users)
+      .where(or(eq(users.username, email), eq(users.email, email)))
+      .limit(1);
+    if (existingRows[0]) return res.status(409).json({ message: "Un compte existe déjà avec cet email." });
 
     const user = await storage.createUser({
       username: email,
@@ -984,7 +989,12 @@ export async function registerRoutes(
     const { username, password } = parsed.data;
     const login = String(username).trim().toLowerCase();
 
-    const user = await storage.getUserByUsername(login);
+    // Allow login by username OR email.
+    let user = await storage.getUserByUsername(login);
+    if (!user && db) {
+      const rows = await db.select().from(users).where(eq(users.email, login)).limit(1);
+      user = rows[0] as any;
+    }
     if (!user) return res.status(401).json({ message: "Invalid credentials" });
     if ((user as any).deletedAt) return res.status(403).json({ message: "Compte supprimé." });
     const ok = await verifyPassword(password, user.password);
@@ -1003,7 +1013,7 @@ export async function registerRoutes(
 
     // Always return ok (avoid user enumeration).
     console.log(`[PasswordReset] request: email=${email}`);
-    const rows = await db.select().from(users).where(eq(users.username, email)).limit(1);
+    const rows = await db.select().from(users).where(or(eq(users.email, email), eq(users.username, email))).limit(1);
     const u = rows[0] as any;
     if (!u || u.deletedAt) {
       console.log(`[PasswordReset] request: user_not_found_or_deleted email=${email}`);
@@ -1065,7 +1075,7 @@ export async function registerRoutes(
     const newPassword = parsed.data.newPassword;
     if (!looksLikeEmail(email)) return res.status(400).json({ message: "Email invalide" });
 
-    const rows = await db.select().from(users).where(eq(users.username, email)).limit(1);
+    const rows = await db.select().from(users).where(or(eq(users.email, email), eq(users.username, email))).limit(1);
     const u = rows[0] as any;
     if (!u || u.deletedAt) return res.status(400).json({ message: "Code invalide" });
 
