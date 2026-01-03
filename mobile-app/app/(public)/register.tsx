@@ -1,10 +1,15 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { authRegister } from '../../services/auth';
+import { useAppTheme } from '../../services/settingsTheme';
+import { Ionicons } from '@expo/vector-icons';
+import { PublicScaffold, usePrimaryTints } from '../../components/UI/PublicScaffold';
+
+const HERO_IMAGE = require('../../assets/119589243_10178365.jpg'); // TODO: replace with your custom illustration
 
 function looksLikeEmail(s: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s || '').trim());
@@ -13,10 +18,15 @@ function looksLikeEmail(s: string): boolean {
 export default function RegisterScreen() {
   const router = useRouter();
   const qc = useQueryClient();
+  const t = useAppTheme();
+  const tint = usePrimaryTints();
+
+  // Extra fields (UI requirement) — backend currently ignores them.
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [asPro, setAsPro] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -50,7 +60,8 @@ export default function RegisterScreen() {
     try {
       await authRegister({ username: email, password });
       await qc.invalidateQueries({ queryKey: ['auth-me'] });
-      router.replace(asPro ? '/business' : '/map');
+      // Go through onboarding steps after registration (role, optional establishment info, terms, welcome).
+      router.replace('/post-register');
     } catch (e: any) {
       setError(String(e?.response?.data?.message || e?.message || 'Erreur'));
     } finally {
@@ -59,127 +70,131 @@ export default function RegisterScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <LinearGradient colors={['#070b13', '#0b2a6b', '#2563eb']} style={styles.bg}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-          <View style={styles.container}>
-            <View style={styles.hero}>
-              <Text style={styles.kicker}>O'Show • Compte</Text>
-              <Text style={styles.title}>Créer un compte</Text>
-              <Text style={styles.sub}>Email de confirmation requis pour activer l’espace Pro.</Text>
-            </View>
+    <SafeAreaView style={[styles.safe, { backgroundColor: t.bg }]}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }} keyboardVerticalOffset={0}>
+        <ScrollView bounces={false} contentContainerStyle={{ flexGrow: 1, paddingBottom: 28 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+          <PublicScaffold heroImage={HERO_IMAGE} cardTitle="Créer un compte" cardSubtitle="Quelques secondes et c’est parti" onBack={() => router.back()}>
+            <LinearGradient colors={[tint.fieldA, tint.fieldB]} style={styles.pill}>
+              <Ionicons name="person-outline" size={18} color="rgba(11,18,32,0.62)" />
+              <TextInput
+                value={firstName}
+                onChangeText={setFirstName}
+                placeholder="Prénom"
+                placeholderTextColor="rgba(11,18,32,0.45)"
+                style={styles.pillInput}
+              />
+            </LinearGradient>
 
-            <View style={styles.card}>
-              <View style={styles.segment}>
-                <TouchableOpacity onPress={() => setAsPro(true)} style={[styles.segBtn, asPro && styles.segBtnActive]}>
-                  <Text style={[styles.segText, asPro && styles.segTextActive]}>Établissement</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => setAsPro(false)} style={[styles.segBtn, !asPro && styles.segBtnActive]}>
-                  <Text style={[styles.segText, !asPro && styles.segTextActive]}>Utilisateur</Text>
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.segHint}>
-                {asPro ? "Publier établissement + évènements." : "Découvrir autour de moi."}
-              </Text>
+            <LinearGradient colors={[tint.fieldA, tint.fieldB]} style={[styles.pill, { marginTop: 12 }]}>
+              <Ionicons name="people-outline" size={18} color="rgba(11,18,32,0.62)" />
+              <TextInput
+                value={lastName}
+                onChangeText={setLastName}
+                placeholder="Nom"
+                placeholderTextColor="rgba(11,18,32,0.45)"
+                style={styles.pillInput}
+              />
+            </LinearGradient>
 
-              <Text style={[styles.label, { marginTop: 14 }]}>Email</Text>
+            <LinearGradient colors={[tint.fieldA, tint.fieldB]} style={[styles.pill, { marginTop: 12 }]}>
+              <Ionicons name="mail-outline" size={18} color="rgba(11,18,32,0.62)" />
               <TextInput
                 value={username}
                 onChangeText={setUsername}
                 autoCapitalize="none"
                 autoCorrect={false}
                 keyboardType="email-address"
-                placeholder="contact@domaine.com"
-                placeholderTextColor="rgba(255,255,255,0.55)"
-                style={[styles.input, username.length > 0 && !emailOk && styles.inputWarn]}
+                placeholder="Email"
+                placeholderTextColor="rgba(11,18,32,0.45)"
+                style={styles.pillInput}
               />
-              {!!username && (
-                <Text style={[styles.helper, !emailOk && { color: 'rgba(251,191,36,0.95)' }]}>
-                  {emailOk ? 'OK.' : 'Email invalide.'}
-                </Text>
-              )}
+            </LinearGradient>
 
-              <Text style={[styles.label, { marginTop: 12 }]}>Mot de passe</Text>
+            <LinearGradient colors={[tint.fieldA, tint.fieldB]} style={[styles.pill, { marginTop: 12 }]}>
+              <Ionicons name="lock-closed-outline" size={18} color="rgba(11,18,32,0.62)" />
               <TextInput
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry
-                placeholder="••••••••"
-                placeholderTextColor="rgba(255,255,255,0.55)"
-                style={[styles.input, !!password && !passwordOk && styles.inputWarn]}
+                placeholder="Mot de passe"
+                placeholderTextColor="rgba(11,18,32,0.45)"
+                style={styles.pillInput}
               />
-              {!!password && (
-                <Text style={[styles.helper, !passwordOk && { color: 'rgba(251,191,36,0.95)' }]}>{passwordHint}</Text>
-              )}
+            </LinearGradient>
 
-              <Text style={[styles.label, { marginTop: 12 }]}>Confirmer</Text>
+            <LinearGradient colors={[tint.fieldA, tint.fieldB]} style={[styles.pill, { marginTop: 12 }]}>
+              <Ionicons name="checkmark-circle-outline" size={18} color="rgba(11,18,32,0.62)" />
               <TextInput
                 value={confirm}
                 onChangeText={setConfirm}
                 secureTextEntry
-                placeholder="••••••••"
-                placeholderTextColor="rgba(255,255,255,0.55)"
-                style={[styles.input, !!confirm && !confirmOk && styles.inputWarn]}
+                placeholder="Confirmation mot de passe"
+                placeholderTextColor="rgba(11,18,32,0.45)"
+                style={styles.pillInput}
               />
-              {!!confirm && (
-                <Text style={[styles.helper, !confirmOk && { color: 'rgba(251,191,36,0.95)' }]}>
-                  {confirmOk ? 'OK.' : 'Ne correspond pas.'}
-                </Text>
-              )}
+            </LinearGradient>
 
-              {!!error && (
-                <View style={styles.error}>
-                  <Text style={styles.errorTitle}>Création impossible</Text>
-                  <Text style={styles.errorText}>{error}</Text>
-                </View>
-              )}
+            {!!password && (
+              <Text style={[styles.helper, !passwordOk && { color: 'rgba(239,68,68,0.65)' }]}>{passwordHint}</Text>
+            )}
 
-              <TouchableOpacity style={[styles.primary, !canSubmit && { opacity: 0.6 }]} disabled={!canSubmit} onPress={submit}>
-                {loading ? <ActivityIndicator color="#0b1220" /> : <Text style={styles.primaryText}>Créer mon compte</Text>}
-              </TouchableOpacity>
+            {!!error && (
+              <View style={styles.error}>
+                <Text style={styles.errorTitle}>Création impossible</Text>
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            )}
 
-              <TouchableOpacity style={styles.secondary} onPress={() => router.replace('/login')}>
-                <Text style={styles.secondaryText}>J’ai déjà un compte</Text>
-              </TouchableOpacity>
+            <TouchableOpacity style={[styles.primaryWrap, !canSubmit && { opacity: 0.65 }]} disabled={!canSubmit} onPress={submit} activeOpacity={0.9}>
+              <LinearGradient colors={[tint.buttonA, tint.buttonB]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.primary}>
+                {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Créer un compte</Text>}
+              </LinearGradient>
+            </TouchableOpacity>
 
-              <Text style={styles.foot}>
-                Après création, ouvre ton email et clique sur “Confirmer mon email”.
-              </Text>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </LinearGradient>
+            {/* Use push (not replace) so Android/iOS back works */}
+            <TouchableOpacity style={styles.secondary} onPress={() => router.push('/login')} activeOpacity={0.9}>
+              <Text style={styles.secondaryText}>J’ai déjà un compte</Text>
+            </TouchableOpacity>
+          </PublicScaffold>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#0b1220' },
-  bg: { flex: 1 },
-  container: { flex: 1, paddingHorizontal: 18, paddingTop: 10, paddingBottom: 18 },
-  hero: { paddingTop: 8, paddingBottom: 8 },
-  kicker: { color: 'rgba(255,255,255,0.78)', fontWeight: '900', letterSpacing: 0.6, fontSize: 12, textTransform: 'uppercase' },
-  title: { color: '#fff', fontSize: 30, fontWeight: '950', letterSpacing: -0.3, marginTop: 6 },
-  sub: { color: 'rgba(255,255,255,0.82)', fontSize: 13, lineHeight: 18, marginTop: 8, maxWidth: 420 },
-  card: { marginTop: 10, backgroundColor: 'rgba(255,255,255,0.10)', borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', padding: 16 },
-  segment: { flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.22)', borderRadius: 999, padding: 4, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' },
-  segBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 999 },
-  segBtnActive: { backgroundColor: '#fff' },
-  segText: { color: 'rgba(255,255,255,0.85)', fontWeight: '900' },
-  segTextActive: { color: '#0b1220' },
-  segHint: { marginTop: 8, color: 'rgba(255,255,255,0.70)', fontWeight: '700', fontSize: 12 },
-  label: { color: 'rgba(255,255,255,0.86)', fontWeight: '900', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 },
-  input: { marginTop: 8, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 12, backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)', color: '#fff', fontWeight: '800' },
-  inputWarn: { borderColor: 'rgba(251,191,36,0.7)' },
-  helper: { marginTop: 6, color: 'rgba(255,255,255,0.66)', fontWeight: '700', fontSize: 12 },
-  primary: { marginTop: 16, backgroundColor: '#fff', borderRadius: 16, paddingVertical: 14, alignItems: 'center' },
-  primaryText: { color: '#0b1220', fontWeight: '950' },
-  secondary: { marginTop: 10, borderRadius: 16, paddingVertical: 14, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.22)', backgroundColor: 'rgba(255,255,255,0.06)' },
-  secondaryText: { color: '#fff', fontWeight: '900' },
-  error: { marginTop: 12, backgroundColor: 'rgba(239,68,68,0.18)', borderColor: 'rgba(239,68,68,0.35)', borderWidth: 1, borderRadius: 16, padding: 12 },
-  errorTitle: { color: '#fff', fontWeight: '950', marginBottom: 4 },
-  errorText: { color: 'rgba(255,255,255,0.86)', fontWeight: '700', fontSize: 12, lineHeight: 16 },
-  foot: { marginTop: 12, color: 'rgba(255,255,255,0.62)', fontWeight: '700', fontSize: 12, lineHeight: 16 },
+  safe: { flex: 1 },
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 999,
+  },
+  pillInput: { flex: 1, color: '#0b1220', fontSize: 14, fontWeight: '400' },
+
+  helper: { marginTop: 8, color: 'rgba(11,18,32,0.55)', fontWeight: '400', fontSize: 12 },
+
+  error: { marginTop: 12, backgroundColor: 'rgba(239,68,68,0.08)', borderRadius: 18, padding: 12 },
+  errorTitle: { color: '#0b1220', fontWeight: '500', marginBottom: 4, fontSize: 13 },
+  errorText: { color: 'rgba(11,18,32,0.70)', fontWeight: '400', fontSize: 12, lineHeight: 16 },
+
+  primaryWrap: { marginTop: 16, borderRadius: 999, overflow: 'hidden' },
+  primary: {
+    paddingVertical: 14,
+    borderRadius: 999,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 8,
+  },
+  primaryText: { color: '#fff', fontWeight: '500', fontSize: 15 },
+
+  secondary: { marginTop: 12, alignItems: 'center', paddingVertical: 12 },
+  secondaryText: { color: 'rgba(11,18,32,0.60)', fontWeight: '400', textDecorationLine: 'underline' },
 });
 
 

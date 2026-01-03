@@ -3,11 +3,12 @@
  * Pas de formulaire: juste un choix, feedback immédiat, sauvegarde locale.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { OnboardingIntent, setOnboardingIntent, setOnboardingSeen } from '../../services/onboarding';
+import { PublicScaffold, usePrimaryTints } from '../../components/UI/PublicScaffold';
 
 type Choice = { id: OnboardingIntent; label: string; emoji: string };
 
@@ -20,17 +21,8 @@ const CHOICES: Choice[] = [
 
 export default function OnboardingIntentScreen() {
   const router = useRouter();
+  const tint = usePrimaryTints();
   const [selected, setSelected] = useState<Set<OnboardingIntent>>(new Set());
-
-  const fade = useRef(new Animated.Value(0)).current;
-  const up = useRef(new Animated.Value(10)).current;
-
-  useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fade, { toValue: 1, duration: 650, useNativeDriver: true }),
-      Animated.timing(up, { toValue: 0, duration: 650, useNativeDriver: true }),
-    ]).start();
-  }, [fade, up]);
 
   const disabled = selected.size === 0;
   const selectedArr = useMemo(() => Array.from(selected), [selected]);
@@ -47,130 +39,75 @@ export default function OnboardingIntentScreen() {
   const submit = async () => {
     await setOnboardingIntent(selectedArr);
     await setOnboardingSeen(true);
-    // Continue vers la suite du flow (permissions GPS), sans écran blanc.
-    router.replace('/permissions');
+    // Minimal flow: enter the app (map uses default location if permission isn't granted).
+    router.replace('/map');
   };
 
   return (
-    <View style={styles.root}>
-      <LinearGradient colors={['#f8fafc', '#eef2ff', '#e0f2fe']} style={styles.bg}>
-        <Animated.View style={{ opacity: fade, transform: [{ translateY: up }] }}>
-          <Text style={styles.title}>Qu’est-ce qui vous attire aujourd’hui ?</Text>
-          <Text style={styles.sub}>Choisissez 1 ou plusieurs.</Text>
-        </Animated.View>
+    <PublicScaffold
+      heroImage={require('../../assets/1_MTX5Z_3rxqD3s3CqxUXVyw.png')}
+      cardTitle="Qu’est-ce qui vous attire aujourd’hui ?"
+      onBack={() => router.back()}
+    >
+      <Text style={styles.sub}>Choisissez 1 ou plusieurs.</Text>
 
-        <View style={styles.grid}>
-          {CHOICES.map((c, idx) => {
-            const active = selected.has(c.id);
-            return (
-              <AnimatedChoice
-                key={c.id}
-                delay={120 + idx * 80}
-                active={active}
-                label={c.label}
-                emoji={c.emoji}
-                onPress={() => toggle(c.id)}
-              />
-            );
-          })}
-        </View>
+      <View style={styles.grid}>
+        {CHOICES.map((c) => {
+          const active = selected.has(c.id);
+          return (
+            <Pressable key={c.id} onPress={() => toggle(c.id)} style={({ pressed }) => [pressed && { opacity: 0.92 }]}>
+              <LinearGradient
+                colors={active ? [tint.fieldB, tint.fieldA] : [tint.fieldA, tint.fieldA]}
+                style={[styles.choice, active && styles.choiceActive]}
+              >
+                <Text style={styles.choiceEmoji}>{c.emoji}</Text>
+                <Text style={[styles.choiceLabel, active && styles.choiceLabelActive]} numberOfLines={2}>
+                  {c.label}
+                </Text>
+              </LinearGradient>
+            </Pressable>
+          );
+        })}
+      </View>
 
-        <View style={styles.bottom}>
-          <Pressable
-            onPress={submit}
-            disabled={disabled}
-            style={({ pressed }) => [
-              styles.cta,
-              disabled && styles.ctaDisabled,
-              pressed && !disabled && { opacity: 0.9 },
-            ]}
-          >
-            <Text style={[styles.ctaText, disabled && styles.ctaTextDisabled]}>
-              Entrer dans l’application
-            </Text>
-          </Pressable>
-        </View>
-      </LinearGradient>
-    </View>
-  );
-}
-
-function AnimatedChoice(props: {
-  delay: number;
-  active: boolean;
-  label: string;
-  emoji: string;
-  onPress: () => void;
-}) {
-  const appear = useRef(new Animated.Value(0)).current;
-  const scale = useRef(new Animated.Value(1)).current;
-
-  useEffect(() => {
-    Animated.timing(appear, { toValue: 1, duration: 520, delay: props.delay, useNativeDriver: true }).start();
-  }, [appear, props.delay]);
-
-  useEffect(() => {
-    Animated.spring(scale, {
-      toValue: props.active ? 1.03 : 1,
-      speed: 18,
-      bounciness: 0,
-      useNativeDriver: true,
-    }).start();
-  }, [props.active, scale]);
-
-  return (
-    <Animated.View style={{ opacity: appear, transform: [{ scale }] }}>
-      <Pressable onPress={props.onPress} style={({ pressed }) => [pressed && { opacity: 0.92 }]}>
-        <LinearGradient
-          colors={props.active ? ['rgba(37,99,235,0.18)', 'rgba(37,99,235,0.06)'] : ['#ffffff', '#ffffff']}
-          style={[styles.choice, props.active && styles.choiceActive]}
-        >
-          <Text style={styles.choiceEmoji}>{props.emoji}</Text>
-          <Text style={[styles.choiceLabel, props.active && styles.choiceLabelActive]} numberOfLines={2}>
-            {props.label}
-          </Text>
+      <Pressable
+        onPress={submit}
+        disabled={disabled}
+        style={({ pressed }) => [styles.ctaWrap, (disabled || pressed) && { opacity: disabled ? 0.55 : 0.9 }]}
+      >
+        <LinearGradient colors={[tint.buttonA, tint.buttonB]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.cta}>
+          <Text style={styles.ctaText}>Entrer dans l’application</Text>
         </LinearGradient>
       </Pressable>
-    </Animated.View>
+    </PublicScaffold>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#f8fafc' },
-  bg: { flex: 1, paddingHorizontal: 18, paddingTop: 18, paddingBottom: 16 },
-  title: { fontSize: 26, fontWeight: '950', color: '#0b1220', letterSpacing: -0.2, marginTop: 6 },
-  sub: { marginTop: 8, color: '#64748b', fontSize: 13, fontWeight: '700' },
-  grid: { marginTop: 18, gap: 12 },
+  sub: { marginTop: 2, color: 'rgba(11,18,32,0.60)', fontSize: 13, fontWeight: '400', textAlign: 'center' },
+  grid: { marginTop: 14, gap: 12 },
   choice: {
-    borderRadius: 18,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
   },
   choiceActive: {
-    borderColor: 'rgba(37,99,235,0.45)',
-    shadowColor: '#2563eb',
-    shadowOpacity: 0.18,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 3,
+    // visual emphasis stays subtle (no hard borders)
   },
   choiceEmoji: { fontSize: 20 },
-  choiceLabel: { flex: 1, fontSize: 14, fontWeight: '900', color: '#0b1220' },
-  choiceLabelActive: { color: '#2563eb' },
-  bottom: { marginTop: 'auto' },
+  choiceLabel: { flex: 1, fontSize: 14, fontWeight: '400', color: '#0b1220' },
+  choiceLabelActive: { color: '#0b1220' },
+
+  ctaWrap: { marginTop: 16, borderRadius: 999, overflow: 'hidden' },
   cta: {
     alignItems: 'center',
-    borderRadius: 16,
+    borderRadius: 999,
     paddingVertical: 14,
-    backgroundColor: '#0b1220',
   },
-  ctaDisabled: { backgroundColor: '#cbd5e1' },
-  ctaText: { color: '#fff', fontWeight: '900', fontSize: 15 },
-  ctaTextDisabled: { color: '#475569' },
+  ctaText: { color: '#fff', fontWeight: '500', fontSize: 15 },
 });
 
 

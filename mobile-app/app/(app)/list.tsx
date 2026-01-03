@@ -30,6 +30,8 @@ import { OfflineBanner } from '../../components/UI/OfflineBanner';
 import { useStableQueryOrigin } from '../../services/queryOrigin';
 import { useAppTheme } from '../../services/settingsTheme';
 import LottieView from 'lottie-react-native';
+import { authMe } from '../../services/auth';
+import { setFavorite } from '../../services/favoritesApi';
 
 const LOCATION_LOADER = require('../../assets/Location.json');
 
@@ -56,6 +58,31 @@ export default function ListScreen() {
   const [radiusKm, setRadiusKm] = useState<5 | 10 | 25 | 50 | 200>(10);
   const favItems = useFavoritesStore((s) => s.items);
   const toggleFav = useFavoritesStore((s) => s.toggle);
+
+  const { data: me } = useQuery({
+    queryKey: ['auth-me'],
+    queryFn: () => authMe(),
+    staleTime: 1000 * 20,
+    retry: false,
+  });
+  const isAuthed = !!me;
+
+  const toggleFavoriteGuarded = async (est: Establishment) => {
+    if (!isAuthed) {
+      router.push('/login');
+      return;
+    }
+    const id = String(est?.id || '').trim();
+    if (!id) return;
+    const was = !!favItems[id];
+    const next = !was;
+    toggleFav(est);
+    try {
+      await setFavorite({ establishmentId: id, active: next });
+    } catch {
+      toggleFav(est);
+    }
+  };
 
   // Ensure list works even if user never opened the Map tab (start GPS tracking here too)
   useEffect(() => {
@@ -151,7 +178,7 @@ export default function ListScreen() {
       <EstablishmentFeedCard
         item={item}
         onPress={() => router.push(`/establishment/${item.id}`)}
-        favorite={{ active: !!favItems[item.id], onToggle: () => toggleFav(item) }}
+        favorite={{ active: !!favItems[item.id], onToggle: () => void toggleFavoriteGuarded(item) }}
       />
     </View>
   );

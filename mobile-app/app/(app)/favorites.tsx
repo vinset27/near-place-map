@@ -2,9 +2,12 @@ import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useQuery } from '@tanstack/react-query';
 import { useFavoritesStore } from '../../stores/useFavoritesStore';
 import { EstablishmentCard } from '../../components/Cards/EstablishmentCard';
 import { useAppTheme } from '../../services/settingsTheme';
+import { authMe } from '../../services/auth';
+import { setFavorite } from '../../services/favoritesApi';
 
 export default function FavoritesScreen() {
   const router = useRouter();
@@ -12,6 +15,13 @@ export default function FavoritesScreen() {
   const items = useFavoritesStore((s) => s.items);
   const toggle = useFavoritesStore((s) => s.toggle);
   const clear = useFavoritesStore((s) => s.clear);
+  const { data: me } = useQuery({
+    queryKey: ['auth-me'],
+    queryFn: () => authMe(),
+    staleTime: 1000 * 20,
+    retry: false,
+  });
+  const isAuthed = !!me;
 
   const data = useMemo(() => Object.values(items).sort((a, b) => b.savedAt - a.savedAt), [items]);
 
@@ -26,7 +36,18 @@ export default function FavoritesScreen() {
         )}
       </View>
 
-      {data.length === 0 ? (
+      {!isAuthed ? (
+        <View style={styles.empty}>
+          <Text style={[styles.emptyIcon, { color: t.text, transform: [{ scale: t.textScale }] }]}>🔒</Text>
+          <Text style={[styles.emptyTitle, { color: t.text, transform: [{ scale: t.textScale }] }]}>Connecte‑toi pour utiliser les favoris</Text>
+          <Text style={[styles.emptyText, { color: t.muted, transform: [{ scale: t.textScale }] }]}>
+            Un utilisateur ne peut pas ajouter un établissement en favori s’il n’est pas inscrit.
+          </Text>
+          <TouchableOpacity style={[styles.loginBtn, { backgroundColor: t.primary }]} onPress={() => router.push('/login')}>
+            <Text style={styles.loginBtnText}>Connexion</Text>
+          </TouchableOpacity>
+        </View>
+      ) : data.length === 0 ? (
         <View style={styles.empty}>
           <Text style={[styles.emptyIcon, { color: t.text, transform: [{ scale: t.textScale }] }]}>♡</Text>
           <Text style={[styles.emptyTitle, { color: t.text, transform: [{ scale: t.textScale }] }]}>Aucun favori</Text>
@@ -42,7 +63,18 @@ export default function FavoritesScreen() {
             <EstablishmentCard
               item={item}
               onPress={() => router.push(`/establishment/${item.id}`)}
-              favorite={{ active: true, onToggle: () => toggle(item) }}
+              favorite={{
+                active: true,
+                onToggle: () => {
+                  const id = String(item?.id || '').trim();
+                  if (!id) return;
+                  toggle(item);
+                  void setFavorite({ establishmentId: id, active: false }).catch(() => {
+                    // revert if backend failed
+                    toggle(item);
+                  });
+                },
+              }}
             />
           )}
         />
@@ -72,6 +104,8 @@ const styles = StyleSheet.create({
   emptyIcon: { fontSize: 56, marginBottom: 16, color: '#0b1220' },
   emptyTitle: { fontSize: 18, fontWeight: '900', color: '#0b1220', marginBottom: 6, textAlign: 'center' },
   emptyText: { fontSize: 14, color: '#64748b', textAlign: 'center' },
+  loginBtn: { marginTop: 14, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 999 },
+  loginBtnText: { color: '#fff', fontWeight: '900' },
 });
 
 

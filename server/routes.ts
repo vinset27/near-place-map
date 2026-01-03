@@ -18,11 +18,13 @@ import {
 } from "@shared/schema";
 import { hashPassword, verifyPassword } from "./auth";
 import { db, ensureAppTables } from "./db";
+import { pool } from "./db";
 import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { presignBusinessPhotoPut } from "./r2";
 import { googlePlacesNearbyAll, mapGoogleTypesToCategory } from "./googlePlaces";
 import { resendSendEmail } from "./resend";
+import { sendExpoPush } from "./push";
 
 type EstablishmentsCacheEntry = { at: number; body: any; etag: string };
 const EST_CACHE_TTL_MS = 10_000;
@@ -215,6 +217,129 @@ export async function registerRoutes(
   );
 
   await ensureAppTables();
+
+  // Admin: Resend smoke test (helps diagnose "200 but no email" situations on Render).
+  app.post(
+    "/api/admin/resend/test",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+      const parsed = z.object({ to: z.string().min(3).max(200) }).safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+      const to = String(parsed.data.to || "").trim().toLowerCase();
+      console.log(`[Resend] test: attempting to send to=${to}`);
+      const out = await resendSendEmail({
+        from: "mapper-oshow@binarysecurity.com",
+        to,
+        subject: "Resend test — O'Show",
+        html: `<div style="font-family:system-ui;line-height:1.5"><h3>Resend OK ✅</h3><p>Si tu lis ce message, Resend fonctionne depuis Render.</p></div>`,
+      });
+      console.log(`[Resend] test: sent id=${String((out as any)?.id || "")}`);
+      return res.json({ ok: true, id: (out as any)?.id || null });
+    }),
+  );
+
+  // Notifications: register device push token (Expo) for the authenticated user.
+  // NOTE: Expo Go can't receive remote push on Android SDK53+, so mobile keeps local test notifications separately.
+  app.post(
+    "/api/notifications/push-token",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      if (!pool) return res.status(500).json({ message: "DATABASE_URL not configured" });
+      const userId = String(req.session.userId || "");
+      const parsed = z
+        .object({
+          token: z.string().min(10).max(300),
+          platform: z.string().max(20).optional(),
+        })
+        .safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+      const token = String(parsed.data.token || "").trim();
+      if (!token) return res.status(400).json({ message: "token is required" });
+
+      await pool.query(
+        `
+          insert into push_tokens (user_id, token, platform, updated_at)
+          values ($1, $2, $3, now())
+          on conflict (user_id, token)
+          do update set platform = excluded.platform, updated_at = now()
+        `,
+        [userId, token, parsed.data.platform ? String(parsed.data.platform).trim() : null],
+      );
+      return res.json({ ok: true });
+    }),
+  );
+
+  // Favorites (auth-required): used for notifications + a consistent cross-device experience.
+  app.get(
+    "/api/favorites",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      if (!pool) return res.status(500).json({ message: "DATABASE_URL not configured" });
+      const userId = String(req.session.userId || "");
+      const rows = await pool.query(`select establishment_id, created_at from favorites where user_id = $1 order by created_at desc`, [userId]);
+      return res.json({ favorites: rows.rows });
+    }),
+  );
+
+  // Set favorite state (idempotent).
+  app.post(
+    "/api/favorites/:id",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      if (!pool) return res.status(500).json({ message: "DATABASE_URL not configured" });
+      const userId = String(req.session.userId || "");
+      const id = String(req.params.id || "").trim();
+      if (!isUuidLike(id)) return res.status(400).json({ message: "Invalid id" });
+      const parsed = z.object({ active: z.boolean() }).safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+
+      if (parsed.data.active) {
+        await pool.query(`insert into favorites (user_id, establishment_id) values ($1, $2) on conflict do nothing`, [userId, id]);
+      } else {
+        await pool.query(`delete from favorites where user_id = $1 and establishment_id = $2`, [userId, id]);
+      }
+      return res.json({ ok: true });
+    }),
+  );
+
+  // Navigation signal: when a user starts an itinerary toward an establishment,
+  // notify the establishment owner (if any).
+  app.post(
+    "/api/analytics/establishments/:id/navigation-start",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      if (!db || !pool) return res.status(500).json({ message: "DATABASE_URL not configured" });
+      const userId = String(req.session.userId || "");
+      const id = String(req.params.id || "").trim();
+      if (!isUuidLike(id)) return res.status(400).json({ message: "Invalid id" });
+      const parsed = z.object({ mode: z.string().max(24).optional() }).safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+
+      // Record event (best-effort)
+      await pool
+        .query(
+          `insert into establishment_navigation_events (establishment_id, user_id, mode) values ($1, $2, $3)`,
+          [id, userId, parsed.data.mode ? String(parsed.data.mode).trim() : null],
+        )
+        .catch(() => {});
+
+      // Find owner for push
+      const estRows = await db.select().from(establishments).where(eq(establishments.id, id as any)).limit(1);
+      const est = estRows[0] as any;
+      const ownerUserId = String(est?.ownerUserId || "").trim();
+      if (!ownerUserId || ownerUserId === userId) return res.json({ ok: true });
+
+      const tokenRows = await pool.query(`select token from push_tokens where user_id = $1 order by updated_at desc limit 20`, [ownerUserId]);
+      const tokens = tokenRows.rows.map((r: any) => String(r.token || "")).filter(Boolean);
+      await sendExpoPush(tokens, {
+        title: "Itinéraire",
+        body: `Un utilisateur trace un itinéraire vers ${String(est?.name || "votre établissement")}.`,
+        data: { type: "navigation_start", establishmentId: id },
+      }).catch(() => {});
+
+      return res.json({ ok: true });
+    }),
+  );
 
   // Healthcheck endpoint (Render / UptimeRobot). Must be fast and not require auth.
   app.get("/api/health", async (_req, res) => {
@@ -824,6 +949,7 @@ export async function registerRoutes(
         String(process.env.PUBLIC_API_URL || "").trim() ||
         `${req.protocol}://${req.get("host")}`;
       const link = `${baseUrl.replace(/\/+$/, "")}/api/auth/verify-email?token=${encodeURIComponent(token)}`;
+      console.log(`[Resend] register: attempting to send verification email to=${email}`);
       await resendSendEmail({
         from: "mapper-oshow@binarysecurity.com",
         to: email,
@@ -837,6 +963,7 @@ export async function registerRoutes(
           </div>
         `,
       });
+      console.log(`[Resend] register: sent verification email to=${email}`);
     } catch (e: any) {
       console.warn("[Resend] email verification failed:", e?.message || e);
       // Don't block registration.
@@ -1419,6 +1546,38 @@ export async function registerRoutes(
       const id = String(req.params.id || "").trim();
       if (!isUuidLike(id)) return res.status(400).json({ message: "Invalid id" });
       await db.update(events).set({ published: true }).where(eq(events.id, id as any));
+
+      // Notify users who favorited this establishment (best-effort).
+      if (pool) {
+        try {
+          const evRows = await db
+            .select({ ev: events, est: establishments })
+            .from(events)
+            .leftJoin(establishments, eq(events.establishmentId, establishments.id))
+            .where(eq(events.id, id as any))
+            .limit(1);
+          const row = evRows[0] as any;
+          const ev = row?.ev;
+          const est = row?.est;
+          const estId = String(ev?.establishmentId || "").trim();
+          if (estId) {
+            const favRows = await pool.query(`select user_id from favorites where establishment_id = $1`, [estId]);
+            const userIds = Array.from(new Set(favRows.rows.map((r: any) => String(r.user_id || "")).filter(Boolean)));
+            if (userIds.length) {
+              const tokRows = await pool.query(`select token from push_tokens where user_id = any($1::varchar[])`, [userIds]);
+              const tokens = tokRows.rows.map((r: any) => String(r.token || "")).filter(Boolean);
+              await sendExpoPush(tokens, {
+                title: "Nouvel évènement",
+                body: `${String(est?.name || "Un établissement")} • ${String(ev?.title || "Un nouvel évènement")}`,
+                data: { type: "event_published", eventId: id, establishmentId: estId },
+              });
+            }
+          }
+        } catch (e: any) {
+          console.warn("[push] notify favorites failed", String(e?.message || e));
+        }
+      }
+
       return res.json({ ok: true });
     }),
   );

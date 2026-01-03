@@ -24,9 +24,14 @@ import { getPlaceFallbackImage } from '../services/placeFallbackImage';
 import type { RouteStep } from '../services/mapboxDirections';
 import type { Establishment } from '../types/establishment';
 import { isNavigationBackgroundTrackingRunning, setNavigationSession, startNavigationBackgroundTracking, stopNavigationBackgroundTracking } from '../services/navigationBackground';
+import api from '../services/api';
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
+}
+
+function isUuidLike(s: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(s || '').trim());
 }
 
 function bearingDeg(from: { lat: number; lng: number }, to: { lat: number; lng: number }): number {
@@ -50,7 +55,17 @@ function formatDuration(seconds: number): string {
 
 export default function NavigationScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ id?: string; mode?: string }>();
+  const params = useLocalSearchParams<{
+    id?: string;
+    mode?: string;
+    lat?: string;
+    lng?: string;
+    name?: string;
+    category?: string;
+    address?: string;
+    commune?: string;
+    cover?: string;
+  }>();
   const id = params.id ? String(params.id) : '';
   const initialMode = (params.mode as TravelMode) || 'driving';
   const qc = useQueryClient();
@@ -67,6 +82,40 @@ export default function NavigationScreen() {
   const [nextTurn, setNextTurn] = useState<{ title: string; subtitle: string } | null>(null);
   const [nearbyHint, setNearbyHint] = useState<{ title: string; subtitle: string } | null>(null);
   const [autoHideGuide, setAutoHideGuide] = useState(true);
+
+  // Signal backend once: used to notify establishment owner ("someone started an itinerary to you").
+  useEffect(() => {
+    const estId = String(id || '').trim();
+    if (!estId || !isUuidLike(estId)) return;
+    void api.post(`/api/analytics/establishments/${encodeURIComponent(estId)}/navigation-start`, { mode: String(initialMode || '') }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  const fallbackFromParams = useMemo((): Establishment | null => {
+    const lat = Number(params.lat);
+    const lng = Number(params.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    const name = String(params.name || 'Destination');
+    const category = String(params.category || 'other');
+    const address = String(params.address || '');
+    const commune = String(params.commune || '');
+    const cover = params.cover ? String(params.cover) : '';
+    return {
+      id: isUuidLike(id) ? id : `tmp:${lat},${lng}`,
+      name,
+      category: category as any,
+      description: '',
+      address,
+      commune,
+      phone: null,
+      coordinates: { lat, lng },
+      rating: 0,
+      isOpen: true,
+      imageUrl: cover,
+      features: [],
+      photos: cover ? [cover] : [],
+    } as any;
+  }, [id, params.address, params.category, params.commune, params.cover, params.lat, params.lng, params.name]);
 
   const mapRef = useRef<MapView>(null);
   const lastLocRef = useRef<{ lat: number; lng: number } | null>(null);
@@ -131,12 +180,13 @@ export default function NavigationScreen() {
 
   const { data: establishment, isLoading: estLoading, error: estError } = useQuery({
     queryKey: ['establishment', id],
-    enabled: !!id,
+    enabled: !!id && isUuidLike(id),
     queryFn: async () => {
       const api = await fetchEstablishmentById(id);
       if (!api) throw new Error('Établissement introuvable');
       return toUiEstablishment(api);
     },
+    initialData: fallbackFromParams || undefined,
   });
 
   const originKey = useMemo(() => {
@@ -147,7 +197,7 @@ export default function NavigationScreen() {
   }, [routeOrigin, userLocation]);
 
   const { data: route, isLoading: routeLoading, error: routeError } = useQuery({
-    queryKey: ['directions', id, originKey.lat, originKey.lng, mode],
+    queryKey: ['directions', (establishment as any)?.id || id, originKey.lat, originKey.lng, mode],
     enabled: !!establishment && !!originKey,
     queryFn: async () => {
       const hasMapbox =

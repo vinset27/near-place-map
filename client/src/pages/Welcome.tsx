@@ -4,7 +4,7 @@ import { Compass, ListChecks, Navigation, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getNextParam } from "@/lib/onboarding";
 import bg from "@assets/cave2.jpg";
-import logo from "@assets/TrouverChap.png";
+import logo from "@assets/localisation.png";
 
 export default function Welcome() {
   const [, setLocation] = useLocation();
@@ -25,7 +25,7 @@ export default function Welcome() {
           <div className="flex items-center gap-3 mb-8">
             <img
               src={logo}
-              alt="TrouverChap"
+              alt="NearPlace"
               className="h-12 w-12 rounded-2xl object-cover border border-white/10 bg-black/20"
             />
             <div className="leading-tight">

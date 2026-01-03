@@ -11,3 +11,6 @@ ALTER TABLE users
   ADD COLUMN IF NOT EXISTS email_verification_sent_at timestamptz;
 
 
+
+
+

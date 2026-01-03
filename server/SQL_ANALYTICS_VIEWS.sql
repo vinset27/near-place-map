@@ -18,3 +18,6 @@ CREATE INDEX IF NOT EXISTS establishment_views_anon_id_idx ON establishment_view
 
 
 
+
+
+

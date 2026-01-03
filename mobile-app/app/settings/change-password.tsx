@@ -1,12 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { ScrollView, View, Text, TouchableOpacity, TextInput, ActivityIndicator } from 'react-native';
+import { ScrollView, View, Text, TouchableOpacity, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { authMe, changePassword, requestPasswordReset, resetPassword } from '../../services/auth';
 import { useAppTheme } from '../../services/settingsTheme';
 import { InlineToast, SettingsScreenShell, SettingsSection } from '../../components/Settings/SettingsPrimitives';
+import { PublicScaffold, usePrimaryTints } from '../../components/UI/PublicScaffold';
+import { LinearGradient } from 'expo-linear-gradient';
 
 export default function ChangePasswordScreen() {
   const t = useAppTheme();
+  const tint = usePrimaryTints();
   const qc = useQueryClient();
   const { data: me } = useQuery({ queryKey: ['auth-me'], queryFn: () => authMe(), staleTime: 1000 * 20, retry: false });
   const isAuthed = !!me;
@@ -90,6 +93,93 @@ export default function ChangePasswordScreen() {
       setLoading(false);
     }
   };
+
+  if (!isAuthed) {
+    return (
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }} keyboardVerticalOffset={0}>
+        <ScrollView bounces={false} contentContainerStyle={{ flexGrow: 1, paddingBottom: 28 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+          <PublicScaffold
+            heroImage={require('../../assets/119589227_10198948.jpg')}
+            cardTitle="Réinitialiser"
+            cardSubtitle="Recevez un code par email"
+          >
+            {!!toast && <InlineToast text={toast} tone={toast.toLowerCase().includes('erreur') ? 'danger' : 'ok'} />}
+
+            <LinearGradient colors={[tint.fieldA, tint.fieldB]} style={{ borderRadius: 999, paddingHorizontal: 14, paddingVertical: 12, marginTop: 4 }}>
+              <TextInput
+                value={email}
+                onChangeText={setEmail}
+                placeholder="Email"
+                placeholderTextColor="rgba(11,18,32,0.45)"
+                autoCapitalize="none"
+                keyboardType="email-address"
+                style={{ color: '#0b1220', fontWeight: '400' }}
+              />
+            </LinearGradient>
+
+            <TouchableOpacity
+              disabled={loading}
+              onPress={requestCode}
+              style={{ marginTop: 14, opacity: loading ? 0.75 : 1, borderRadius: 999, overflow: 'hidden' }}
+              activeOpacity={0.9}
+            >
+              <LinearGradient colors={[tint.buttonA, tint.buttonB]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ paddingVertical: 14, alignItems: 'center' }}>
+                {loading ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: '600' }}>Envoyer le code</Text>}
+              </LinearGradient>
+            </TouchableOpacity>
+
+            {codeRequested && (
+              <View style={{ marginTop: 12, gap: 12 }}>
+                <LinearGradient colors={[tint.fieldA, tint.fieldB]} style={{ borderRadius: 999, paddingHorizontal: 14, paddingVertical: 12 }}>
+                  <TextInput
+                    value={code}
+                    onChangeText={setCode}
+                    placeholder="Code reçu"
+                    placeholderTextColor="rgba(11,18,32,0.45)"
+                    keyboardType="number-pad"
+                    style={{ color: '#0b1220', fontWeight: '400' }}
+                  />
+                </LinearGradient>
+
+                <LinearGradient colors={[tint.fieldA, tint.fieldB]} style={{ borderRadius: 999, paddingHorizontal: 14, paddingVertical: 12 }}>
+                  <TextInput
+                    value={resetPass}
+                    onChangeText={setResetPass}
+                    placeholder="Nouveau mot de passe"
+                    placeholderTextColor="rgba(11,18,32,0.45)"
+                    secureTextEntry
+                    style={{ color: '#0b1220', fontWeight: '400' }}
+                  />
+                </LinearGradient>
+
+                <LinearGradient colors={[tint.fieldA, tint.fieldB]} style={{ borderRadius: 999, paddingHorizontal: 14, paddingVertical: 12 }}>
+                  <TextInput
+                    value={resetConfirm}
+                    onChangeText={setResetConfirm}
+                    placeholder="Confirmer"
+                    placeholderTextColor="rgba(11,18,32,0.45)"
+                    secureTextEntry
+                    style={{ color: '#0b1220', fontWeight: '400' }}
+                  />
+                </LinearGradient>
+
+                <TouchableOpacity
+                  disabled={loading}
+                  onPress={submitReset}
+                  style={{ marginTop: 4, opacity: loading ? 0.75 : 1, borderRadius: 999, overflow: 'hidden' }}
+                  activeOpacity={0.9}
+                >
+                  <LinearGradient colors={[tint.buttonA, tint.buttonB]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ paddingVertical: 14, alignItems: 'center' }}>
+                    {loading ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: '600' }}>Valider</Text>}
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            )}
+          </PublicScaffold>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    );
+  }
 
   return (
     <SettingsScreenShell title="Mot de passe">

@@ -8,6 +8,7 @@ import { fetchProProfile } from '../../services/pro';
 import { PlaceImage } from '../../components/UI/PlaceImage';
 import { useAppTheme } from '../../services/settingsTheme';
 import { Divider, SearchBar, SettingsRow, SettingsSection, SkeletonRow } from '../../components/Settings/SettingsPrimitives';
+import { InAppHeroHeader } from '../../components/UI/InAppHeroHeader';
 
 type MenuItem = {
   key: string;
@@ -84,52 +85,40 @@ export default function BusinessScreen() {
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: t.bg }]}>
-      <View style={[styles.header, { backgroundColor: t.card, borderBottomColor: t.border }]}>
-        <View style={styles.headerRow}>
-          <View style={[styles.avatar, { borderColor: t.border, backgroundColor: t.input }]}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
+        <InAppHeroHeader
+          heroImage={require('../../assets/bars.jpg')}
+          title="Espace utilisateur"
+          subtitle={isAuthed ? (isEstablishment ? 'Compte établissement' : 'Compte utilisateur') : 'Non connecté'}
+          badgeRight={
+            isEstablishment ? (
+              <View style={{ paddingHorizontal: 10, paddingVertical: 8, borderRadius: 999, backgroundColor: 'rgba(11,18,32,0.06)' }}>
+                <Text style={{ color: '#0b1220', fontWeight: '400', fontSize: 12 }}>🏪 Établissement</Text>
+              </View>
+            ) : null
+          }
+          avatar={
             <PlaceImage
               uri={(proProfile as any)?.avatarUrl || null}
               id="pro-avatar"
               name={displayName}
               category={isEstablishment ? 'establishment' : 'user'}
-              style={styles.avatarImg}
+              style={{ width: 46, height: 46, borderRadius: 18 }}
               textSize={16}
             />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.hTitle, { color: t.text }]}>Espace utilisateur</Text>
-            <Text style={[styles.hSub, { color: t.muted }]} numberOfLines={1}>
-              {isAuthed ? (isEstablishment ? 'Compte établissement' : 'Compte utilisateur') : 'Non connecté'}
-            </Text>
-          </View>
-          {isEstablishment ? (
-            <View style={[styles.rolePill, { borderColor: t.border, backgroundColor: t.input }]}>
-              <Text style={[styles.rolePillText, { color: t.text }]}>🏪 Établissement</Text>
-            </View>
-          ) : null}
-        </View>
+          }
+          primaryAction={
+            !isAuthed
+              ? { label: 'Connexion', onPress: () => router.push('/login') }
+              : { label: 'Mon compte', onPress: () => router.push('/settings/account') }
+          }
+          secondaryAction={
+            !isAuthed ? { label: 'Créer un compte', onPress: () => router.push('/register') } : undefined
+          }
+        />
 
-        <View style={styles.headerActions}>
-          {!isAuthed ? (
-            <>
-              <TouchableOpacity style={[styles.actionBtn, { backgroundColor: t.primary }]} onPress={() => router.push('/login')}>
-                <Text style={styles.actionBtnText}>Login</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.actionGhost, { borderColor: t.border }]} onPress={() => router.push('/register')}>
-                <Text style={[styles.actionGhostText, { color: t.text }]}>Créer un compte</Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <TouchableOpacity style={[styles.actionGhost, { borderColor: t.border }]} onPress={() => router.push('/settings/account')}>
-              <Text style={[styles.actionGhostText, { color: t.text }]}>Mon compte</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
+        <SearchBar value={q} onChangeText={setQ} placeholder="Rechercher…" />
 
-      <SearchBar value={q} onChangeText={setQ} placeholder="Search for a setting…" />
-
-      <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
         {isBackendError && (
           <View style={[styles.warn, { backgroundColor: t.card, borderColor: t.border }]}>
             <Text style={[styles.warnTitle, { color: t.text }]}>Backend indisponible</Text>
@@ -197,19 +186,6 @@ export default function BusinessScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  header: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 12, borderBottomWidth: 1 },
-  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  avatar: { width: 44, height: 44, borderRadius: 16, overflow: 'hidden', borderWidth: 1 },
-  avatarImg: { width: 44, height: 44, borderRadius: 16 },
-  hTitle: { fontSize: 16, fontWeight: '900' },
-  hSub: { marginTop: 2, fontSize: 12, fontWeight: '800' },
-  rolePill: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 999, borderWidth: 1 },
-  rolePillText: { fontWeight: '900', fontSize: 12 },
-  headerActions: { flexDirection: 'row', gap: 10, marginTop: 10 },
-  actionBtn: { flex: 1, borderRadius: 14, paddingVertical: 12, alignItems: 'center' },
-  actionBtnText: { color: '#fff', fontWeight: '900' },
-  actionGhost: { flex: 1, borderRadius: 14, paddingVertical: 12, alignItems: 'center', borderWidth: 1, backgroundColor: 'transparent' },
-  actionGhostText: { fontWeight: '900' },
   warn: { marginTop: 12, marginHorizontal: 14, padding: 14, borderRadius: 18, borderWidth: 1 },
   warnTitle: { fontWeight: '900', marginBottom: 6 },
   warnText: { fontWeight: '800', lineHeight: 18 },

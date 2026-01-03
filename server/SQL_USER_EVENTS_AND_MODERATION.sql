@@ -35,3 +35,6 @@ ALTER TABLE user_events
 -- UPDATE user_events SET published = false WHERE published = true;
 
 
+
+
+

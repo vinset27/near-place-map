@@ -100,8 +100,9 @@ export function BottomSheet(props: {
   const backdropOpacity = props.backdrop
     ? translateY.interpolate({
         // When expanded (yMin), backdrop is stronger. When collapsed/hidden (yMax), backdrop is 0.
-        inputRange: [yMax, yMin],
-        outputRange: [0, 0.35],
+        // inputRange must be monotonically non-decreasing (Android is strict).
+        inputRange: [yMin, yMax],
+        outputRange: [0.35, 0],
         extrapolate: 'clamp',
       })
     : null;

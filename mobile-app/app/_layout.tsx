@@ -87,7 +87,7 @@ export default function RootLayout() {
           <Stack.Screen name="business-dashboard" options={{ animation: 'slide_from_right' }} />
 
           {/* Admin (moderation) */}
-          <Stack.Screen name="admin" options={{ animation: 'slide_from_right' }} />
+          <Stack.Screen name="admin/index" options={{ animation: 'slide_from_right' }} />
 
           {/* Details + navigation are pushed above tabs */}
           <Stack.Screen name="establishment/[id]" options={{ animation: 'slide_from_right' }} />

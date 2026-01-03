@@ -47,6 +47,15 @@ export const PlaceImage = memo(function PlaceImage(props: {
     return <Image source={fallbackSource} style={[styles.base, style]} resizeMode="cover" />;
   }
 
+  // Simple default avatar for regular users (requested): no flashy gradient/initials.
+  if (String(category || '').toLowerCase() === 'user') {
+    return (
+      <View style={[styles.base, styles.userAvatar, style]}>
+        <Text style={[styles.userIcon, { fontSize: Math.max(16, Math.round(textSize * 0.9)) }]}>👤</Text>
+      </View>
+    );
+  }
+
   return (
     <LinearGradient colors={[v.bg1, v.bg2]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.base, style]}>
       <View style={styles.glow} />
@@ -57,6 +66,8 @@ export const PlaceImage = memo(function PlaceImage(props: {
 
 const styles = StyleSheet.create({
   base: { backgroundColor: '#e2e8f0', overflow: 'hidden' },
+  userAvatar: { alignItems: 'center', justifyContent: 'center' },
+  userIcon: { color: 'rgba(11,18,32,0.55)', fontWeight: '600' },
   glow: {
     position: 'absolute',
     width: 120,

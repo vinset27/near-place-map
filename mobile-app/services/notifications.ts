@@ -2,10 +2,19 @@ import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform, Linking } from 'react-native';
+import api from './api';
 
 const KEY_PUSH = 'nearplace:expoPushToken:v1';
+const KEY_PUSH_SYNC = 'nearplace:expoPushToken:syncedAt:v1';
 
 let handlerSet = false;
+
+function isExpoGo(): boolean {
+  // Covers older + newer SDKs.
+  const appOwnership = (Constants as any)?.appOwnership;
+  const execEnv = (Constants as any)?.executionEnvironment;
+  return appOwnership === 'expo' || execEnv === 'storeClient';
+}
 
 export function ensureNotificationHandler() {
   if (handlerSet) return;
@@ -59,6 +68,10 @@ export async function registerForExpoPushToken(): Promise<string | null> {
   // Web is not supported.
   if (Platform.OS === 'web') return null;
 
+  // SDK 53+: Expo Go no longer supports remote push notifications on Android (and this call warns noisily).
+  // We still support local notifications (scheduleNotificationAsync) without a token.
+  if (isExpoGo()) return null;
+
   const perm = await getNotificationPermissions();
   if (!perm?.granted) {
     const req = await requestNotificationPermissions();
@@ -80,6 +93,22 @@ export async function registerForExpoPushToken(): Promise<string | null> {
   const token = tokenRes?.data ? String(tokenRes.data) : null;
   if (token && token.trim()) {
     await AsyncStorage.setItem(KEY_PUSH, token.trim()).catch(() => {});
+    // Best-effort sync to backend (only works when user is logged in and running a dev build / production app).
+    // Avoid spamming: sync at most once per 24h for the same device/session.
+    try {
+      const last = Number(await AsyncStorage.getItem(KEY_PUSH_SYNC).catch(() => '0')) || 0;
+      if (Date.now() - last > 24 * 60 * 60 * 1000) {
+        await api
+          .post('/api/notifications/push-token', {
+            token: token.trim(),
+            platform: Platform.OS,
+          })
+          .catch(() => {});
+        await AsyncStorage.setItem(KEY_PUSH_SYNC, String(Date.now())).catch(() => {});
+      }
+    } catch {
+      // ignore
+    }
     return token.trim();
   }
   return null;

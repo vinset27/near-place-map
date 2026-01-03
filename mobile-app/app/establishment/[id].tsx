@@ -24,6 +24,8 @@ import { useCurrentLocation } from '../../stores/useLocationStore';
 import { haversineDistance, formatDistance } from '../../services/location';
 import { PlaceImage } from '../../components/UI/PlaceImage';
 import { useFavoritesStore } from '../../stores/useFavoritesStore';
+import { authMe } from '../../services/auth';
+import { setFavorite } from '../../services/favoritesApi';
 import { fetchGooglePlaceDetails } from '../../services/googlePlaceDetails';
 import { getPlaceFallbackImage } from '../../services/placeFallbackImage';
 import { trackEstablishmentView } from '../../services/analytics';
@@ -51,6 +53,13 @@ export default function EstablishmentDetailsScreen() {
   }, [defaultTravelMode]);
   const favItems = useFavoritesStore((s) => s.items);
   const toggleFav = useFavoritesStore((s) => s.toggle);
+  const { data: me } = useQuery({
+    queryKey: ['auth-me'],
+    queryFn: () => authMe(),
+    staleTime: 1000 * 20,
+    retry: false,
+  });
+  const isAuthed = !!me;
 
   const cachedFromLists = useMemo(() => {
     if (!id) return null;
@@ -188,7 +197,36 @@ export default function EstablishmentDetailsScreen() {
 
   const handleNavigate = () => {
     // In-app navigation (preferred)
-    router.push({ pathname: '/navigation', params: { id: establishment.id, mode: travelMode } } as any);
+    router.push({
+      pathname: '/navigation',
+      params: {
+        id: establishment.id,
+        mode: travelMode,
+        lat: String(establishment.coordinates.lat),
+        lng: String(establishment.coordinates.lng),
+        name: establishment.name,
+        category: establishment.category,
+        address: establishment.address || '',
+        commune: establishment.commune || '',
+        cover: (displayPhotos[0] || establishment.imageUrl || '') as any,
+      },
+    } as any);
+  };
+
+  const toggleFavoriteGuarded = async () => {
+    if (!isAuthed) {
+      router.push('/login');
+      return;
+    }
+    const id = String(establishment.id || '').trim();
+    const was = !!favItems[id];
+    const next = !was;
+    toggleFav(establishment);
+    try {
+      await setFavorite({ establishmentId: id, active: next });
+    } catch {
+      toggleFav(establishment);
+    }
   };
 
   const handleOpenMaps = () => {
@@ -236,7 +274,7 @@ export default function EstablishmentDetailsScreen() {
             </TouchableOpacity>
 
             <View style={styles.headerRight}>
-              <TouchableOpacity style={styles.headerButton} onPress={() => toggleFav(establishment)}>
+              <TouchableOpacity style={styles.headerButton} onPress={() => void toggleFavoriteGuarded()}>
                 <Text style={[styles.headerButtonIcon, !!favItems[establishment.id] && { color: '#ef4444' }]}>
                   {!!favItems[establishment.id] ? '♥' : '♡'}
                 </Text>

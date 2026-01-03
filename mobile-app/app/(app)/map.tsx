@@ -33,6 +33,7 @@ import { BottomSheet } from '../../components/UI/BottomSheet';
 import { EstablishmentCard } from '../../components/Cards/EstablishmentCard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFavoritesStore } from '../../stores/useFavoritesStore';
+import { setFavorite } from '../../services/favoritesApi';
 import { OfflineBanner } from '../../components/UI/OfflineBanner';
 import { demoEvents, getUpcomingEventsForEstablishments } from '../../services/events';
 import { useStableQueryOrigin } from '../../services/queryOrigin';
@@ -102,6 +103,26 @@ export default function MapScreen() {
     retry: false,
   });
   const isEstablishment = !!me && (me as any)?.role === 'establishment' && !!(me as any)?.profileCompleted;
+  const isAuthed = !!me;
+
+  const toggleFavoriteGuarded = async (est: any) => {
+    if (!isAuthed) {
+      router.push('/login');
+      return;
+    }
+    const id = String(est?.id || '').trim();
+    if (!id) return;
+    const was = !!favItems[id];
+    const next = !was;
+    // optimistic
+    toggleFav(est);
+    try {
+      await setFavorite({ establishmentId: id, active: next });
+    } catch {
+      // revert if backend failed
+      toggleFav(est);
+    }
+  };
 
   const [region, setRegion] = useState<Region>({
     latitude: userLocation.lat,
@@ -767,7 +788,7 @@ export default function MapScreen() {
               onClose={() => setSelectedMarker(null)}
               favorite={{
                 active: !!favItems[selectedEstablishment.id],
-                onToggle: () => toggleFav(selectedEstablishment),
+                onToggle: () => void toggleFavoriteGuarded(selectedEstablishment),
               }}
             />
 
@@ -777,7 +798,22 @@ export default function MapScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.mapCtaPrimary}
-                onPress={() => router.push({ pathname: '/navigation', params: { id: selectedEstablishment.id, mode: 'driving' } } as any)}
+                onPress={() =>
+                  router.push({
+                    pathname: '/navigation',
+                    params: {
+                      id: selectedEstablishment.id,
+                      mode: 'driving',
+                      lat: String(selectedEstablishment.coordinates.lat),
+                      lng: String(selectedEstablishment.coordinates.lng),
+                      name: selectedEstablishment.name,
+                      category: selectedEstablishment.category,
+                      address: selectedEstablishment.address || '',
+                      commune: selectedEstablishment.commune || '',
+                      cover: selectedEstablishment.imageUrl || '',
+                    },
+                  } as any)
+                }
               >
                 <Text style={styles.mapCtaPrimaryText}>Itinéraire</Text>
               </TouchableOpacity>

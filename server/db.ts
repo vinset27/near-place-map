@@ -218,6 +218,43 @@ export async function ensureAppTables() {
     );
   `);
   await pool.query(`create index if not exists establishment_views_establishment_id_idx on establishment_views (establishment_id);`);
+
+  // Favorites (auth-required): users subscribe to establishments they like.
+  await pool.query(`
+    create table if not exists favorites (
+      user_id varchar not null,
+      establishment_id uuid not null,
+      created_at timestamptz not null default now(),
+      primary key (user_id, establishment_id)
+    );
+  `);
+  await pool.query(`create index if not exists favorites_establishment_id_idx on favorites (establishment_id);`);
+
+  // Push tokens (Expo): allow sending remote notifications to devices (requires dev build / production app).
+  await pool.query(`
+    create table if not exists push_tokens (
+      id uuid primary key default gen_random_uuid(),
+      user_id varchar not null,
+      token text not null,
+      platform text,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      unique (user_id, token)
+    );
+  `);
+  await pool.query(`create index if not exists push_tokens_user_id_idx on push_tokens (user_id);`);
+
+  // Navigation signals: when a user starts an itinerary to an establishment.
+  await pool.query(`
+    create table if not exists establishment_navigation_events (
+      id uuid primary key default gen_random_uuid(),
+      created_at timestamptz not null default now(),
+      establishment_id uuid not null,
+      user_id varchar not null,
+      mode text
+    );
+  `);
+  await pool.query(`create index if not exists establishment_navigation_events_est_id_idx on establishment_navigation_events (establishment_id);`);
   await pool.query(`create index if not exists establishment_views_created_at_idx on establishment_views (created_at);`);
   await pool.query(`create index if not exists establishment_views_viewer_user_id_idx on establishment_views (viewer_user_id);`);
   await pool.query(`create index if not exists establishment_views_anon_id_idx on establishment_views (anon_id);`);
