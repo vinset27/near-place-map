@@ -246,7 +246,8 @@ export async function registerRoutes(
       try {
         const out = await resendSendEmail({
           // Prefer env-configured sender; fallback is handled in resendSendEmail().
-          from: String(process.env.RESEND_FROM || "mapper-oshow@binarysecurity.com"),
+          // Default sender should match your verified domain (note the dash).
+          from: String(process.env.RESEND_FROM || "mapper-oshow@binary-security.com"),
           to,
           subject: "Resend test — O'Show",
           html: `<div style="font-family:system-ui;line-height:1.5"><h3>Resend OK ✅</h3><p>Si tu lis ce message, Resend fonctionne depuis Render.</p></div>`,
@@ -988,7 +989,7 @@ export async function registerRoutes(
       const link = `${baseUrl.replace(/\/+$/, "")}/api/auth/verify-email?token=${encodeURIComponent(token)}`;
       console.log(`[Resend] register: attempting to send verification email to=${email}`);
       await resendSendEmail({
-        from: String(process.env.RESEND_FROM || "mapper-oshow@binarysecurity.com"),
+        from: String(process.env.RESEND_FROM || "mapper-oshow@binary-security.com"),
         to: email,
         subject: "Confirme ton email — O'Show",
         html: `
@@ -1083,7 +1084,7 @@ export async function registerRoutes(
     try {
       console.log(`[Resend] password-reset: attempting to send to=${email}`);
       const out = await resendSendEmail({
-        from: String(process.env.RESEND_FROM || "mapper-oshow@binarysecurity.com"),
+        from: String(process.env.RESEND_FROM || "mapper-oshow@binary-security.com"),
         to: email,
         subject: "Réinitialiser ton mot de passe — O'Show",
         html: `
@@ -1147,7 +1148,7 @@ export async function registerRoutes(
 
     try {
       await resendSendEmail({
-        from: String(process.env.RESEND_FROM || "mapper-oshow@binarysecurity.com"),
+        from: String(process.env.RESEND_FROM || "mapper-oshow@binary-security.com"),
         to: email,
         subject: "Mot de passe modifié — O'Show",
         html: `<div style="font-family:system-ui; line-height:1.5"><h2>Mot de passe modifié ✅</h2><p>Si ce n’est pas toi, contacte le support immédiatement.</p></div>`,
@@ -1181,7 +1182,7 @@ export async function registerRoutes(
     if (email && looksLikeEmail(email)) {
       try {
         await resendSendEmail({
-          from: String(process.env.RESEND_FROM || "mapper-oshow@binarysecurity.com"),
+          from: String(process.env.RESEND_FROM || "mapper-oshow@binary-security.com"),
           to: email,
           subject: "Mot de passe modifié — O'Show",
           html: `<div style="font-family:system-ui; line-height:1.5"><h2>Mot de passe modifié ✅</h2><p>Si ce n’est pas toi, contacte le support immédiatement.</p></div>`,
@@ -1209,7 +1210,7 @@ export async function registerRoutes(
     if (email && looksLikeEmail(email)) {
       try {
         await resendSendEmail({
-          from: String(process.env.RESEND_FROM || "mapper-oshow@binarysecurity.com"),
+          from: String(process.env.RESEND_FROM || "mapper-oshow@binary-security.com"),
           to: email,
           subject: "Compte supprimé — O'Show",
           html: `<div style="font-family:system-ui; line-height:1.5"><h2>Votre compte a été supprimé</h2><p>Si ce n’est pas vous, contactez le support immédiatement.</p></div>`,
@@ -1254,7 +1255,7 @@ export async function registerRoutes(
     const link = `${baseUrl.replace(/\/+$/, "")}/api/auth/verify-email?token=${encodeURIComponent(token)}`;
     try {
       await resendSendEmail({
-        from: String(process.env.RESEND_FROM || "mapper-oshow@binarysecurity.com"),
+        from: String(process.env.RESEND_FROM || "mapper-oshow@binary-security.com"),
         to: email,
         subject: "Confirme ton email — O'Show",
         html: `
