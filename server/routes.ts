@@ -26,6 +26,22 @@ import { googlePlacesNearbyAll, mapGoogleTypesToCategory } from "./googlePlaces"
 import { resendSendEmail } from "./resend";
 import { sendExpoPush } from "./push";
 
+let _dbIdentityLogged = false;
+async function logDbIdentityOnce() {
+  if (_dbIdentityLogged) return;
+  if (!pool) return;
+  _dbIdentityLogged = true;
+  try {
+    const r = await pool.query(
+      `select current_database() as db, inet_server_addr()::text as host, inet_server_port() as port`,
+    );
+    const row = r?.rows?.[0];
+    console.log(`[DB] connected: db=${row?.db} host=${row?.host} port=${row?.port}`);
+  } catch (e: any) {
+    console.warn("[DB] identity check failed:", e?.message || e);
+  }
+}
+
 type EstablishmentsCacheEntry = { at: number; body: any; etag: string };
 const EST_CACHE_TTL_MS = 10_000;
 const establishmentsCache = new Map<string, EstablishmentsCacheEntry>();
@@ -227,14 +243,24 @@ export async function registerRoutes(
       if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
       const to = String(parsed.data.to || "").trim().toLowerCase();
       console.log(`[Resend] test: attempting to send to=${to}`);
-      const out = await resendSendEmail({
-        from: "mapper-oshow@binarysecurity.com",
-        to,
-        subject: "Resend test — O'Show",
-        html: `<div style="font-family:system-ui;line-height:1.5"><h3>Resend OK ✅</h3><p>Si tu lis ce message, Resend fonctionne depuis Render.</p></div>`,
-      });
-      console.log(`[Resend] test: sent id=${String((out as any)?.id || "")}`);
-      return res.json({ ok: true, id: (out as any)?.id || null });
+      try {
+        const out = await resendSendEmail({
+          // Prefer env-configured sender; fallback is handled in resendSendEmail().
+          from: String(process.env.RESEND_FROM || "mapper-oshow@binarysecurity.com"),
+          to,
+          subject: "Resend test — O'Show",
+          html: `<div style="font-family:system-ui;line-height:1.5"><h3>Resend OK ✅</h3><p>Si tu lis ce message, Resend fonctionne depuis Render.</p></div>`,
+        });
+        console.log(`[Resend] test: sent id=${String((out as any)?.id || "")}`);
+        return res.json({ ok: true, id: (out as any)?.id || null });
+      } catch (e: any) {
+        const msg = String(e?.message || e || "Resend failed");
+        // Bubble up a clearer status instead of generic 500.
+        const m = msg.match(/Resend error \((\d+)\):/);
+        const code = m ? Number(m[1]) : 500;
+        const status = Number.isFinite(code) && code >= 400 && code < 600 ? code : 500;
+        return res.status(status).json({ message: msg });
+      }
     }),
   );
 
@@ -916,6 +942,7 @@ export async function registerRoutes(
 
   app.post("/api/auth/register", async (req, res) => {
     if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    await logDbIdentityOnce();
     // We accept {username,password} for backwards compatibility, but we require username to be an email
     // so we can send a confirmation email.
     const parsed = z
@@ -933,7 +960,12 @@ export async function registerRoutes(
     const existingRows = await db
       .select()
       .from(users)
-      .where(or(eq(users.username, email), eq(users.email, email)))
+      .where(
+        or(
+          sql`lower(trim(${users.username})) = ${email}`,
+          sql`lower(trim(${users.email})) = ${email}`,
+        ),
+      )
       .limit(1);
     if (existingRows[0]) return res.status(409).json({ message: "Un compte existe déjà avec cet email." });
 
@@ -956,7 +988,7 @@ export async function registerRoutes(
       const link = `${baseUrl.replace(/\/+$/, "")}/api/auth/verify-email?token=${encodeURIComponent(token)}`;
       console.log(`[Resend] register: attempting to send verification email to=${email}`);
       await resendSendEmail({
-        from: "mapper-oshow@binarysecurity.com",
+        from: String(process.env.RESEND_FROM || "mapper-oshow@binarysecurity.com"),
         to: email,
         subject: "Confirme ton email — O'Show",
         html: `
@@ -979,6 +1011,7 @@ export async function registerRoutes(
   });
 
   app.post("/api/auth/login", async (req, res) => {
+    await logDbIdentityOnce();
     const parsed = z
       .object({
         username: z.string().min(3).max(200),
@@ -992,7 +1025,11 @@ export async function registerRoutes(
     // Allow login by username OR email.
     let user = await storage.getUserByUsername(login);
     if (!user && db) {
-      const rows = await db.select().from(users).where(eq(users.email, login)).limit(1);
+      const rows = await db
+        .select()
+        .from(users)
+        .where(sql`lower(trim(${users.email})) = ${login}`)
+        .limit(1);
       user = rows[0] as any;
     }
     if (!user) return res.status(401).json({ message: "Invalid credentials" });
@@ -1006,6 +1043,7 @@ export async function registerRoutes(
   // Password reset (request) - generates a short code and sends it with Resend.
   app.post("/api/auth/request-password-reset", asyncHandler(async (req, res) => {
     if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    await logDbIdentityOnce();
     const parsed = z.object({ email: z.string().min(3).max(200) }).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
     const email = String(parsed.data.email).trim().toLowerCase();
@@ -1013,7 +1051,16 @@ export async function registerRoutes(
 
     // Always return ok (avoid user enumeration).
     console.log(`[PasswordReset] request: email=${email}`);
-    const rows = await db.select().from(users).where(or(eq(users.email, email), eq(users.username, email))).limit(1);
+    const rows = await db
+      .select()
+      .from(users)
+      .where(
+        or(
+          sql`lower(trim(${users.email})) = ${email}`,
+          sql`lower(trim(${users.username})) = ${email}`,
+        ),
+      )
+      .limit(1);
     const u = rows[0] as any;
     if (!u || u.deletedAt) {
       console.log(`[PasswordReset] request: user_not_found_or_deleted email=${email}`);
@@ -1036,7 +1083,7 @@ export async function registerRoutes(
     try {
       console.log(`[Resend] password-reset: attempting to send to=${email}`);
       const out = await resendSendEmail({
-        from: "mapper-oshow@binarysecurity.com",
+        from: String(process.env.RESEND_FROM || "mapper-oshow@binarysecurity.com"),
         to: email,
         subject: "Réinitialiser ton mot de passe — O'Show",
         html: `
@@ -1075,7 +1122,16 @@ export async function registerRoutes(
     const newPassword = parsed.data.newPassword;
     if (!looksLikeEmail(email)) return res.status(400).json({ message: "Email invalide" });
 
-    const rows = await db.select().from(users).where(or(eq(users.email, email), eq(users.username, email))).limit(1);
+    const rows = await db
+      .select()
+      .from(users)
+      .where(
+        or(
+          sql`lower(trim(${users.email})) = ${email}`,
+          sql`lower(trim(${users.username})) = ${email}`,
+        ),
+      )
+      .limit(1);
     const u = rows[0] as any;
     if (!u || u.deletedAt) return res.status(400).json({ message: "Code invalide" });
 
@@ -1091,7 +1147,7 @@ export async function registerRoutes(
 
     try {
       await resendSendEmail({
-        from: "mapper-oshow@binarysecurity.com",
+        from: String(process.env.RESEND_FROM || "mapper-oshow@binarysecurity.com"),
         to: email,
         subject: "Mot de passe modifié — O'Show",
         html: `<div style="font-family:system-ui; line-height:1.5"><h2>Mot de passe modifié ✅</h2><p>Si ce n’est pas toi, contacte le support immédiatement.</p></div>`,
@@ -1125,7 +1181,7 @@ export async function registerRoutes(
     if (email && looksLikeEmail(email)) {
       try {
         await resendSendEmail({
-          from: "mapper-oshow@binarysecurity.com",
+          from: String(process.env.RESEND_FROM || "mapper-oshow@binarysecurity.com"),
           to: email,
           subject: "Mot de passe modifié — O'Show",
           html: `<div style="font-family:system-ui; line-height:1.5"><h2>Mot de passe modifié ✅</h2><p>Si ce n’est pas toi, contacte le support immédiatement.</p></div>`,
@@ -1153,7 +1209,7 @@ export async function registerRoutes(
     if (email && looksLikeEmail(email)) {
       try {
         await resendSendEmail({
-          from: "mapper-oshow@binarysecurity.com",
+          from: String(process.env.RESEND_FROM || "mapper-oshow@binarysecurity.com"),
           to: email,
           subject: "Compte supprimé — O'Show",
           html: `<div style="font-family:system-ui; line-height:1.5"><h2>Votre compte a été supprimé</h2><p>Si ce n’est pas vous, contactez le support immédiatement.</p></div>`,
@@ -1198,7 +1254,7 @@ export async function registerRoutes(
     const link = `${baseUrl.replace(/\/+$/, "")}/api/auth/verify-email?token=${encodeURIComponent(token)}`;
     try {
       await resendSendEmail({
-        from: "mapper-oshow@binarysecurity.com",
+        from: String(process.env.RESEND_FROM || "mapper-oshow@binarysecurity.com"),
         to: email,
         subject: "Confirme ton email — O'Show",
         html: `
@@ -1214,7 +1270,7 @@ export async function registerRoutes(
       console.warn("[Resend] email verification resend failed:", e?.message || e);
       return res.status(503).json({
         message:
-          "Service email indisponible. Vérifie RESEND_KEY_API sur le backend et que mapper-oshow@binarysecurity.com est autorisé dans Resend.",
+          "Service email indisponible. Vérifie RESEND_KEY_API/RESEND_API_KEY et RESEND_FROM (ou vérifie le domaine d’envoi dans Resend).",
       });
     }
 
@@ -1235,6 +1291,30 @@ export async function registerRoutes(
     const rows = await db.select().from(establishmentProfiles).where(eq(establishmentProfiles.userId, userId)).limit(1);
     return res.json({ profile: rows[0] ?? null });
   });
+
+  // Role intent (allows establishment accounts to continue onboarding and complete profile later).
+  app.post("/api/profile/intent", requireAuth, asyncHandler(async (req, res) => {
+    if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    const userId = req.session.userId!;
+    const parsed = z.object({ role: z.enum(["user", "establishment"]) }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+
+    const rows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const u = rows[0] as any;
+    if (!u) return res.status(401).json({ message: "Unauthorized" });
+
+    const nextRole = parsed.data.role;
+    // Never downgrade an already completed establishment profile.
+    const nextProfileCompleted = nextRole === "establishment" ? !!u.profileCompleted : false;
+
+    await db
+      .update(users)
+      .set({ role: nextRole, profileCompleted: nextProfileCompleted })
+      .where(eq(users.id, userId));
+
+    const updatedUser = await storage.getUser(userId);
+    return res.json({ user: safeUser(updatedUser) });
+  }));
 
   app.post("/api/profile", requireAuth, async (req, res) => {
     if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
