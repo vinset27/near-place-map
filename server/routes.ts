@@ -1017,7 +1017,8 @@ export async function registerRoutes(
       .where(eq(users.id, u.id));
 
     try {
-      await resendSendEmail({
+      console.log(`[Resend] password-reset: attempting to send to=${email}`);
+      const out = await resendSendEmail({
         from: "mapper-oshow@binarysecurity.com",
         to: email,
         subject: "Réinitialiser ton mot de passe — O'Show",
@@ -1030,6 +1031,7 @@ export async function registerRoutes(
           </div>
         `,
       });
+      console.log(`[Resend] password-reset: sent id=${String((out as any)?.id || "")} to=${email}`);
     } catch (e: any) {
       console.warn("[Resend] password reset failed:", e?.message || e);
       return res.status(503).json({

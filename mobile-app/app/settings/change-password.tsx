@@ -28,6 +28,7 @@ export default function ChangePasswordScreen() {
   const [resetPass, setResetPass] = useState('');
   const [resetConfirm, setResetConfirm] = useState('');
   const [codeRequested, setCodeRequested] = useState(false);
+  const [resetStep, setResetStep] = useState<'request' | 'confirm'>('request');
 
   useEffect(() => {
     if (!toast) return;
@@ -67,6 +68,7 @@ export default function ChangePasswordScreen() {
       await requestPasswordReset(e);
       setCodeRequested(true);
       setToast('Code envoyé par email.');
+      setResetStep('confirm');
     } catch (err: any) {
       setToast(String(err?.response?.data?.message || err?.message || 'Erreur'));
     } finally {
@@ -100,36 +102,54 @@ export default function ChangePasswordScreen() {
         <ScrollView bounces={false} contentContainerStyle={{ flexGrow: 1, paddingBottom: 28 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
           <PublicScaffold
             heroImage={require('../../assets/119589227_10198948.jpg')}
-            cardTitle="Réinitialiser"
-            cardSubtitle="Recevez un code par email"
+            cardTitle={resetStep === 'request' ? 'Réinitialiser' : 'Saisir le code'}
+            cardSubtitle={resetStep === 'request' ? 'Recevez un code par email' : 'Définissez un nouveau mot de passe'}
           >
             {!!toast && <InlineToast text={toast} tone={toast.toLowerCase().includes('erreur') ? 'danger' : 'ok'} />}
 
-            <LinearGradient colors={[tint.fieldA, tint.fieldB]} style={{ borderRadius: 999, paddingHorizontal: 14, paddingVertical: 12, marginTop: 4 }}>
-              <TextInput
-                value={email}
-                onChangeText={setEmail}
-                placeholder="Email"
-                placeholderTextColor="rgba(11,18,32,0.45)"
-                autoCapitalize="none"
-                keyboardType="email-address"
-                style={{ color: '#0b1220', fontWeight: '400' }}
-              />
-            </LinearGradient>
+            {resetStep === 'request' && (
+              <>
+                <LinearGradient colors={[tint.fieldA, tint.fieldB]} style={{ borderRadius: 999, paddingHorizontal: 14, paddingVertical: 12, marginTop: 4 }}>
+                  <TextInput
+                    value={email}
+                    onChangeText={setEmail}
+                    placeholder="Email"
+                    placeholderTextColor="rgba(11,18,32,0.45)"
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    style={{ color: '#0b1220', fontWeight: '400' }}
+                  />
+                </LinearGradient>
 
-            <TouchableOpacity
-              disabled={loading}
-              onPress={requestCode}
-              style={{ marginTop: 14, opacity: loading ? 0.75 : 1, borderRadius: 999, overflow: 'hidden' }}
-              activeOpacity={0.9}
-            >
-              <LinearGradient colors={[tint.buttonA, tint.buttonB]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ paddingVertical: 14, alignItems: 'center' }}>
-                {loading ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: '600' }}>Envoyer le code</Text>}
-              </LinearGradient>
-            </TouchableOpacity>
+                <TouchableOpacity
+                  disabled={loading}
+                  onPress={requestCode}
+                  style={{ marginTop: 14, opacity: loading ? 0.75 : 1, borderRadius: 999, overflow: 'hidden' }}
+                  activeOpacity={0.9}
+                >
+                  <LinearGradient colors={[tint.buttonA, tint.buttonB]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ paddingVertical: 14, alignItems: 'center' }}>
+                    {loading ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: '600' }}>Envoyer le code</Text>}
+                  </LinearGradient>
+                </TouchableOpacity>
+              </>
+            )}
 
-            {codeRequested && (
-              <View style={{ marginTop: 12, gap: 12 }}>
+            {resetStep === 'confirm' && (
+              <View style={{ marginTop: 6, gap: 12 }}>
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  onPress={() => {
+                    setResetStep('request');
+                    setCodeRequested(false);
+                    setCode('');
+                    setResetPass('');
+                    setResetConfirm('');
+                  }}
+                  style={{ alignSelf: 'center', paddingVertical: 6, paddingHorizontal: 10 }}
+                >
+                  <Text style={{ color: 'rgba(11,18,32,0.55)', fontWeight: '400', fontSize: 12 }}>← Changer d’email / renvoyer</Text>
+                </TouchableOpacity>
+
                 <LinearGradient colors={[tint.fieldA, tint.fieldB]} style={{ borderRadius: 999, paddingHorizontal: 14, paddingVertical: 12 }}>
                   <TextInput
                     value={code}
@@ -164,7 +184,7 @@ export default function ChangePasswordScreen() {
                 </LinearGradient>
 
                 <TouchableOpacity
-                  disabled={loading}
+                  disabled={loading || !codeRequested}
                   onPress={submitReset}
                   style={{ marginTop: 4, opacity: loading ? 0.75 : 1, borderRadius: 999, overflow: 'hidden' }}
                   activeOpacity={0.9}
