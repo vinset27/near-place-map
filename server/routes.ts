@@ -21,7 +21,7 @@ import { db, ensureAppTables } from "./db";
 import { pool } from "./db";
 import { and, desc, eq, gte, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { presignBusinessPhotoPut } from "./r2";
+import { presignBusinessPhotoPut, presignEventMediaPut } from "./r2";
 import { googlePlacesNearbyAll, mapGoogleTypesToCategory } from "./googlePlaces";
 import { resendSendEmail } from "./resend";
 import { sendExpoPush } from "./push";
@@ -499,6 +499,75 @@ export async function registerRoutes(
     return res.json({ ok: true });
   }));
 
+  // Trips: save a user itinerary start (auth required).
+  app.post(
+    "/api/trips",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      if (!pool) return res.status(500).json({ message: "DATABASE_URL not configured" });
+      const userId = String(req.session.userId || "");
+      const parsed = z
+        .object({
+          mode: z.string().max(24).optional(),
+          originLat: z.number().optional(),
+          originLng: z.number().optional(),
+          destinationType: z.enum(["establishment", "poi"]).default("poi"),
+          establishmentId: z.string().uuid().optional(),
+          destinationName: z.string().max(180).optional(),
+          destinationLat: z.number().optional(),
+          destinationLng: z.number().optional(),
+        })
+        .safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+
+      const d = parsed.data;
+      // Basic validation
+      if (d.destinationType === "establishment" && !d.establishmentId) {
+        return res.status(400).json({ message: "establishmentId requis" });
+      }
+      if (d.destinationType === "poi" && (!Number.isFinite(d.destinationLat) || !Number.isFinite(d.destinationLng))) {
+        return res.status(400).json({ message: "destinationLat/destinationLng requis" });
+      }
+
+      const r = await pool.query(
+        `
+          insert into user_trips
+            (user_id, mode, origin_lat, origin_lng, destination_type, establishment_id, destination_name, destination_lat, destination_lng)
+          values
+            ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          returning id, created_at
+        `,
+        [
+          userId,
+          d.mode ? String(d.mode) : null,
+          Number.isFinite(d.originLat) ? Number(d.originLat) : null,
+          Number.isFinite(d.originLng) ? Number(d.originLng) : null,
+          d.destinationType,
+          d.establishmentId ? String(d.establishmentId) : null,
+          d.destinationName ? String(d.destinationName) : null,
+          Number.isFinite(d.destinationLat) ? Number(d.destinationLat) : null,
+          Number.isFinite(d.destinationLng) ? Number(d.destinationLng) : null,
+        ],
+      );
+      return res.status(201).json({ ok: true, id: r.rows?.[0]?.id, createdAt: r.rows?.[0]?.created_at });
+    }),
+  );
+
+  app.get(
+    "/api/trips/me",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      if (!pool) return res.status(500).json({ message: "DATABASE_URL not configured" });
+      const userId = String(req.session.userId || "");
+      const limit = Math.min(300, Math.max(1, Number(req.query.limit || 100)));
+      const rows = await pool.query(
+        `select * from user_trips where user_id = $1 order by created_at desc limit $2`,
+        [userId, limit],
+      );
+      return res.json({ trips: rows.rows || [] });
+    }),
+  );
+
   // Pro dashboard statistics (requires establishment)
   app.get("/api/pro/stats", requireAuth, requireEstablishment, asyncHandler(async (req, res) => {
     if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
@@ -581,6 +650,21 @@ export async function registerRoutes(
 
     return res.json(out);
   });
+
+  // Pro: presign event media upload (photos/videos) to R2
+  app.post("/api/events/media/presign", requireAuth, requireEstablishment, asyncHandler(async (req, res) => {
+    const parsed = z
+      .object({
+        fileName: z.string().min(1).max(180),
+        contentType: z.string().min(3).max(120),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    const userId = String(req.session.userId || "");
+    const out = await presignEventMediaPut({ ...parsed.data, userId });
+    if (!out || !out.url) return res.status(503).json({ message: "R2 not configured" });
+    return res.json({ putUrl: out.url, publicUrl: out.publicUrl || null, key: out.key });
+  }));
 
   // Business application — creates a pending request.
   // Pro requirement: user must be logged in before submitting.
@@ -1726,6 +1810,7 @@ export async function registerRoutes(
         description: z.string().max(800).optional(),
         coverUrl: z.string().url().max(500).optional(),
         photos: z.array(z.string().url().max(500)).max(10).optional(),
+        videos: z.array(z.string().url().max(500)).max(10).optional(),
       })
       .safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
@@ -1750,6 +1835,10 @@ export async function registerRoutes(
         description: parsed.data.description ?? null,
         coverUrl: parsed.data.coverUrl ?? null,
         photos: parsed.data.photos?.length ? parsed.data.photos : null,
+        videos: parsed.data.videos?.length ? parsed.data.videos : null,
+        moderationStatus: "pending",
+        moderationReason: null,
+        moderatedAt: null,
         // Moderation: admin must approve before public listing
         published: false,
       })
@@ -1840,6 +1929,9 @@ export async function registerRoutes(
         description: parsed.data.description ?? null,
         lat: parsed.data.lat,
         lng: parsed.data.lng,
+        moderationStatus: "pending",
+        moderationReason: null,
+        moderatedAt: null,
         // Moderation: admin must approve before public listing
         published: false,
       })
@@ -1879,7 +1971,7 @@ export async function registerRoutes(
         .leftJoin(establishments, eq(events.establishmentId, establishments.id))
         .leftJoin(establishmentProfiles, eq(events.userId, establishmentProfiles.userId))
         .leftJoin(users, eq(events.userId, users.id))
-        .where(eq(events.published, false))
+        .where(and(eq(events.published, false), or(sql`${events.moderationStatus} is null`, eq(events.moderationStatus, "pending"))))
         .orderBy(desc(events.createdAt))
         .limit(limit);
 
@@ -1890,7 +1982,7 @@ export async function registerRoutes(
         })
         .from(userEvents)
         .leftJoin(users, eq(userEvents.userId, users.id))
-        .where(eq(userEvents.published, false))
+        .where(and(eq(userEvents.published, false), or(sql`${userEvents.moderationStatus} is null`, eq(userEvents.moderationStatus, "pending"))))
         .orderBy(desc(userEvents.createdAt))
         .limit(limit);
 
@@ -2068,7 +2160,10 @@ export async function registerRoutes(
       if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
       const id = String(req.params.id || "").trim();
       if (!isUuidLike(id)) return res.status(400).json({ message: "Invalid id" });
-      await db.update(events).set({ published: true }).where(eq(events.id, id as any));
+      await db
+        .update(events)
+        .set({ published: true, moderationStatus: "approved", moderationReason: null, moderatedAt: new Date() })
+        .where(eq(events.id, id as any));
 
       // Notify users who favorited this establishment (best-effort).
       if (pool) {
@@ -2126,7 +2221,10 @@ export async function registerRoutes(
       if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
       const id = String(req.params.id || "").trim();
       if (!isUuidLike(id)) return res.status(400).json({ message: "Invalid id" });
-      await db.update(userEvents).set({ published: true }).where(eq(userEvents.id, id as any));
+      await db
+        .update(userEvents)
+        .set({ published: true, moderationStatus: "approved", moderationReason: null, moderatedAt: new Date() })
+        .where(eq(userEvents.id, id as any));
 
       // Notify nearby users (within 10km of the meetup location).
       try {
@@ -2159,7 +2257,12 @@ export async function registerRoutes(
       if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
       const id = String(req.params.id || "").trim();
       if (!isUuidLike(id)) return res.status(400).json({ message: "Invalid id" });
-      await db.delete(events).where(eq(events.id, id as any));
+      const parsed = z.object({ reason: z.string().max(260).optional() }).safeParse(req.body);
+      const reason = parsed.success ? String(parsed.data.reason || "").trim() : "";
+      await db
+        .update(events)
+        .set({ published: false, moderationStatus: "rejected", moderationReason: reason || "Non spécifié", moderatedAt: new Date() })
+        .where(eq(events.id, id as any));
       return res.json({ ok: true });
     }),
   );
@@ -2171,7 +2274,12 @@ export async function registerRoutes(
       if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
       const id = String(req.params.id || "").trim();
       if (!isUuidLike(id)) return res.status(400).json({ message: "Invalid id" });
-      await db.delete(userEvents).where(eq(userEvents.id, id as any));
+      const parsed = z.object({ reason: z.string().max(260).optional() }).safeParse(req.body);
+      const reason = parsed.success ? String(parsed.data.reason || "").trim() : "";
+      await db
+        .update(userEvents)
+        .set({ published: false, moderationStatus: "rejected", moderationReason: reason || "Non spécifié", moderatedAt: new Date() })
+        .where(eq(userEvents.id, id as any));
       return res.json({ ok: true });
     }),
   );

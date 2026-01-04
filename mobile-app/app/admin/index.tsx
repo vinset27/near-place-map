@@ -341,15 +341,17 @@ export default function AdminScreen() {
                   <TouchableOpacity
                     style={[styles.reject, { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.26)' }]}
                     onPress={async () => {
-                      const ok = await new Promise<boolean>((resolve) => {
-                        Alert.alert('Rejeter', 'Supprimer cet événement ?', [
-                          { text: 'Annuler', style: 'cancel', onPress: () => resolve(false) },
-                          { text: 'Supprimer', style: 'destructive', onPress: () => resolve(true) },
+                      const reason = await new Promise<string | null>((resolve) => {
+                        Alert.alert('Refuser', 'Choisir un motif', [
+                          { text: 'Spam', onPress: () => resolve('Spam') },
+                          { text: 'Contenu inapproprié', onPress: () => resolve('Contenu inapproprié') },
+                          { text: 'Infos insuffisantes', onPress: () => resolve('Infos insuffisantes') },
+                          { text: 'Annuler', style: 'cancel', onPress: () => resolve(null) },
                         ]);
                       });
-                      if (!ok) return;
-                      await rejectProEvent(String(ev.id), effectiveToken);
-                      setToast('Rejeté.');
+                      if (!reason) return;
+                      await rejectProEvent(String(ev.id), effectiveToken, reason);
+                      setToast('Refusé.');
                       await qc.invalidateQueries({ queryKey: ['admin-pending'] });
                     }}
                   >
@@ -388,15 +390,17 @@ export default function AdminScreen() {
                   <TouchableOpacity
                     style={[styles.reject, { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.26)' }]}
                     onPress={async () => {
-                      const ok = await new Promise<boolean>((resolve) => {
-                        Alert.alert('Rejeter', 'Supprimer cette soirée ?', [
-                          { text: 'Annuler', style: 'cancel', onPress: () => resolve(false) },
-                          { text: 'Supprimer', style: 'destructive', onPress: () => resolve(true) },
+                      const reason = await new Promise<string | null>((resolve) => {
+                        Alert.alert('Refuser', 'Choisir un motif', [
+                          { text: 'Spam', onPress: () => resolve('Spam') },
+                          { text: 'Contenu inapproprié', onPress: () => resolve('Contenu inapproprié') },
+                          { text: 'Infos insuffisantes', onPress: () => resolve('Infos insuffisantes') },
+                          { text: 'Annuler', style: 'cancel', onPress: () => resolve(null) },
                         ]);
                       });
-                      if (!ok) return;
-                      await rejectUserEvent(String(ue.id), effectiveToken);
-                      setToast('Rejeté.');
+                      if (!reason) return;
+                      await rejectUserEvent(String(ue.id), effectiveToken, reason);
+                      setToast('Refusé.');
                       await qc.invalidateQueries({ queryKey: ['admin-pending'] });
                     }}
                   >

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, Alert, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -13,6 +13,8 @@ import { authMe } from '../../services/auth';
 import { fetchMyEstablishments } from '../../services/pro';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import Constants from 'expo-constants';
+import * as ImagePicker from 'expo-image-picker';
+import { uploadEventMedia } from '../../services/eventMedia';
 
 function presetIso(kind: '2h' | 'tonight' | 'tomorrow'): string {
   const now = new Date();
@@ -36,6 +38,9 @@ export default function EventCreateScreen() {
   const [startsAt, setStartsAt] = useState<string>(() => presetIso('2h'));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [mediaUploading, setMediaUploading] = useState(false);
+  const [photoUrls, setPhotoUrls] = useState<string[]>([]);
+  const [videoUrls, setVideoUrls] = useState<string[]>([]);
 
   const { data: me } = useQuery({
     queryKey: ['auth-me'],
@@ -75,6 +80,9 @@ export default function EventCreateScreen() {
         title: title.trim(),
         category,
         startsAt,
+        coverUrl: photoUrls[0] || undefined,
+        photos: photoUrls.length ? photoUrls : undefined,
+        videos: videoUrls.length ? videoUrls : undefined,
       });
       await qc.invalidateQueries({ queryKey: ['pro-my-events'] });
       Alert.alert('En attente', 'Ton événement est en attente de validation admin avant publication.', [{ text: 'OK' }]);
@@ -134,6 +142,96 @@ export default function EventCreateScreen() {
               </TouchableOpacity>
             </View>
             <Text style={styles.hint}>Début: {new Date(startsAt).toLocaleString()}</Text>
+
+            <Text style={[styles.label, { marginTop: 12 }]}>Médias</Text>
+            <Text style={styles.hint}>Ajoute plusieurs photos/vidéos (upload sur ton bucket R2).</Text>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                disabled={!isEstablishment || mediaUploading}
+                onPress={async () => {
+                  if (!isEstablishment) return;
+                  setMediaUploading(true);
+                  try {
+                    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                    if (!perm.granted) {
+                      Alert.alert('Permission', 'Autorise l’accès à la galerie pour ajouter des médias.');
+                      return;
+                    }
+                    const picked = await ImagePicker.launchImageLibraryAsync({
+                      mediaTypes: ImagePicker.MediaTypeOptions.All,
+                      allowsMultipleSelection: true,
+                      quality: 0.92,
+                      videoMaxDuration: 60,
+                    });
+                    if (picked.canceled) return;
+                    for (const a of picked.assets) {
+                      const uri = String((a as any).uri || '');
+                      if (!uri) continue;
+                      const fileName =
+                        String((a as any).fileName || '').trim() ||
+                        uri.split('/').pop() ||
+                        (String((a as any).type || 'media') === 'video' ? 'video.mp4' : 'photo.jpg');
+                      const mime =
+                        String((a as any).mimeType || '').trim() ||
+                        (String((a as any).type || '') === 'video' ? 'video/mp4' : 'image/jpeg');
+                      const url = await uploadEventMedia({ localUri: uri, contentType: mime, fileName });
+                      if (mime.startsWith('video')) setVideoUrls((s) => [...s, url]);
+                      else setPhotoUrls((s) => [...s, url]);
+                    }
+                  } catch (e: any) {
+                    Alert.alert('Upload', String(e?.message || 'Erreur upload'));
+                  } finally {
+                    setMediaUploading(false);
+                  }
+                }}
+                style={[styles.chip, { alignSelf: 'flex-start' }, (mediaUploading || !isEstablishment) && { opacity: 0.6 }]}
+              >
+                <Text style={styles.chipText}>{mediaUploading ? 'Upload…' : 'Ajouter médias'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                disabled={mediaUploading || (!photoUrls.length && !videoUrls.length)}
+                onPress={() => {
+                  setPhotoUrls([]);
+                  setVideoUrls([]);
+                }}
+                style={[styles.chip, { alignSelf: 'flex-start' }, (!photoUrls.length && !videoUrls.length) && { opacity: 0.6 }]}
+              >
+                <Text style={styles.chipText}>Vider</Text>
+              </TouchableOpacity>
+            </View>
+
+            {(photoUrls.length > 0 || videoUrls.length > 0) && (
+              <View style={{ marginTop: 10 }}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingRight: 16 }}>
+                  {photoUrls.map((u) => (
+                    <View key={u} style={{ width: 86, height: 86, borderRadius: 16, overflow: 'hidden', backgroundColor: '#e2e8f0' }}>
+                      <Image source={{ uri: u }} style={{ width: '100%', height: '100%' }} />
+                    </View>
+                  ))}
+                  {videoUrls.map((u) => (
+                    <View
+                      key={u}
+                      style={{
+                        width: 86,
+                        height: 86,
+                        borderRadius: 16,
+                        overflow: 'hidden',
+                        backgroundColor: '#0b1220',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Text style={{ color: '#fff', fontWeight: '900' }}>VIDEO</Text>
+                    </View>
+                  ))}
+                </ScrollView>
+                <Text style={styles.hint}>
+                  {photoUrls.length} photo(s) • {videoUrls.length} vidéo(s)
+                </Text>
+              </View>
+            )}
           </View>
 
           {canShowMap && (

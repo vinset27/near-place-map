@@ -22,27 +22,35 @@ export async function fetchPendingModeration(params?: { token?: string; limit?: 
 }
 
 export async function approveProEvent(id: string, token?: string): Promise<void> {
-  await api.post(`/api/admin/events/${encodeURIComponent(id)}/approve`, null, { headers: adminHeaders(token) });
+  await api.post(`/api/admin/events/${encodeURIComponent(id)}/approve`, {}, { headers: adminHeaders(token) });
 }
 
-export async function rejectProEvent(id: string, token?: string): Promise<void> {
-  await api.post(`/api/admin/events/${encodeURIComponent(id)}/reject`, null, { headers: adminHeaders(token) });
+export async function rejectProEvent(id: string, token?: string, reason?: string): Promise<void> {
+  await api.post(
+    `/api/admin/events/${encodeURIComponent(id)}/reject`,
+    { reason: reason ? String(reason).slice(0, 260) : undefined },
+    { headers: adminHeaders(token) },
+  );
 }
 
 export async function approveUserEvent(id: string, token?: string): Promise<void> {
-  await api.post(`/api/admin/user-events/${encodeURIComponent(id)}/approve`, null, { headers: adminHeaders(token) });
+  await api.post(`/api/admin/user-events/${encodeURIComponent(id)}/approve`, {}, { headers: adminHeaders(token) });
 }
 
-export async function rejectUserEvent(id: string, token?: string): Promise<void> {
-  await api.post(`/api/admin/user-events/${encodeURIComponent(id)}/reject`, null, { headers: adminHeaders(token) });
+export async function rejectUserEvent(id: string, token?: string, reason?: string): Promise<void> {
+  await api.post(
+    `/api/admin/user-events/${encodeURIComponent(id)}/reject`,
+    { reason: reason ? String(reason).slice(0, 260) : undefined },
+    { headers: adminHeaders(token) },
+  );
 }
 
 export async function approveEstablishment(id: string, token?: string): Promise<void> {
-  await api.post(`/api/admin/establishments/${encodeURIComponent(id)}/approve`, null, { headers: adminHeaders(token) });
+  await api.post(`/api/admin/establishments/${encodeURIComponent(id)}/approve`, {}, { headers: adminHeaders(token) });
 }
 
 export async function rejectEstablishment(id: string, token?: string): Promise<void> {
-  await api.post(`/api/admin/establishments/${encodeURIComponent(id)}/reject`, null, { headers: adminHeaders(token) });
+  await api.post(`/api/admin/establishments/${encodeURIComponent(id)}/reject`, {}, { headers: adminHeaders(token) });
 }
 
 export async function setUserRole(login: string, role: 'user' | 'establishment' | 'admin', token?: string): Promise<any> {

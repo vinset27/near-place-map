@@ -72,7 +72,10 @@ export default function UserEventCreateScreen() {
       lat,
       lng,
     });
+    // Important: refetchOnMount is disabled globally; we must invalidate the specific keys.
     await qc.invalidateQueries({ queryKey: ['user-events'] }).catch(() => {});
+    await qc.invalidateQueries({ queryKey: ['user-events-me'] }).catch(() => {});
+    await qc.invalidateQueries({ queryKey: ['admin-pending'] }).catch(() => {});
     Alert.alert('En attente', 'Ta soirée est en attente de validation admin avant d’apparaître sur la carte.', [
       { text: 'OK', onPress: () => router.replace('/user-events-my') },
     ]);

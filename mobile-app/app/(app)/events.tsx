@@ -13,6 +13,7 @@ import { useAppTheme } from '../../services/settingsTheme';
 import { haversineDistance, formatDistance } from '../../services/location';
 import { authMe } from '../../services/auth';
 import { toUiEstablishment } from '../../services/establishments';
+import { AppHeader } from '../../components/UI/AppHeader';
 
 export default function EventsScreen() {
   const router = useRouter();
@@ -85,9 +86,8 @@ export default function EventsScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: t.bg }]}>
-      <View style={[styles.header, { backgroundColor: t.card, borderBottomColor: t.border }]}>
-        <Text style={[styles.title, { color: t.text, transform: [{ scale: t.textScale }] }]}>Événements</Text>
-        <Text style={[styles.sub, { color: t.muted, transform: [{ scale: t.textScale }] }]}>Lives, promos, soirées • triés par proximité</Text>
+      <AppHeader title="Événements" subtitle="Lives, promos, soirées • triés par proximité" onBack={() => router.back()} />
+      <View style={[styles.header, { backgroundColor: t.bg, borderBottomColor: t.border }]}>
 
         {!!toast && (
           <View style={[styles.toast, { backgroundColor: t.input, borderColor: t.border }]}>

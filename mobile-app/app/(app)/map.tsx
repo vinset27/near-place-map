@@ -48,6 +48,7 @@ import { useSettingsStore } from '../../stores/useSettingsStore';
 import { Linking } from 'react-native';
 import LottieView from 'lottie-react-native';
 import { syncExpoPushTokenLocation } from '../../services/notifications';
+import { UserPuck } from '../../components/UI/UserPuck';
 
 const { height } = Dimensions.get('window');
 const APP_LOGO = require('../../assets/icon.png');
@@ -405,7 +406,7 @@ export default function MapScreen() {
           setPanelOpen(false);
           Keyboard.dismiss();
         }}
-        showsUserLocation={hasPermission}
+        showsUserLocation={false}
         showsMyLocationButton={false}
         showsCompass
         toolbarEnabled={false}
@@ -449,6 +450,16 @@ export default function MapScreen() {
           } catch {}
         }}
       >
+        {/* Custom user location cursor (default) */}
+        {hasPermission && Number.isFinite(userLocation?.lat) && Number.isFinite(userLocation?.lng) && (
+          <Marker
+            coordinate={{ latitude: Number(userLocation.lat), longitude: Number(userLocation.lng) }}
+            anchor={{ x: 0.5, y: 0.5 }}
+            tracksViewChanges={false}
+          >
+            <UserPuck />
+          </Marker>
+        )}
         {/* User events (meetups/parties) */}
         {showUserEvents &&
           visibleUserEvents.map((ev: any) => (

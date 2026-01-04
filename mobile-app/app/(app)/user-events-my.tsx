@@ -99,18 +99,30 @@ export default function MyUserEventsScreen() {
                   {String(item.kind) === 'meet' ? 'Point de rencontre' : 'Soirée'} • {new Date(item.startsAt).toLocaleString()}
                 </Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                  {String(item.moderationStatus || '').toLowerCase() === 'rejected' && (
+                    <View style={[styles.statusPill, { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.26)' }]}>
+                      <Text style={{ color: '#ef4444', fontWeight: '950', fontSize: 11 }}>REFUSÉ</Text>
+                    </View>
+                  )}
                   <View
                     style={[
                       styles.statusPill,
-                      { backgroundColor: item.published ? 'rgba(34,197,94,0.14)' : 'rgba(251,191,36,0.14)', borderColor: item.published ? 'rgba(34,197,94,0.30)' : 'rgba(251,191,36,0.35)' },
+                      {
+                        backgroundColor: item.published ? 'rgba(34,197,94,0.14)' : 'rgba(251,191,36,0.14)',
+                        borderColor: item.published ? 'rgba(34,197,94,0.30)' : 'rgba(251,191,36,0.35)',
+                      },
                     ]}
                   >
                     <Text style={{ color: item.published ? '#22c55e' : '#f59e0b', fontWeight: '950', fontSize: 11 }}>
-                      {item.published ? 'PUBLIÉ' : 'EN ATTENTE'}
+                      {item.published ? 'PUBLIÉ' : String(item.moderationStatus || '').toLowerCase() === 'rejected' ? 'REFUSÉ' : 'EN ATTENTE'}
                     </Text>
                   </View>
                   <Text style={{ color: t.muted, fontWeight: '800' }} numberOfLines={1}>
-                    {item.published ? 'Visible sur la carte' : 'Validation admin requise'}
+                    {item.published
+                      ? 'Visible sur la carte'
+                      : String(item.moderationStatus || '').toLowerCase() === 'rejected'
+                        ? String(item.moderationReason || 'Refusé')
+                        : 'Validation admin requise'}
                   </Text>
                 </View>
                 <Text style={{ color: t.muted, fontWeight: '800', marginTop: 4 }} numberOfLines={1}>

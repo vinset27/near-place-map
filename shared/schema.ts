@@ -108,6 +108,10 @@ export const events = pgTable("events", {
   description: text("description"),
   coverUrl: text("cover_url"),
   photos: text("photos").array(),
+  videos: text("videos").array(),
+  moderationStatus: text("moderation_status").notNull().default("pending"),
+  moderationReason: text("moderation_reason"),
+  moderatedAt: timestamp("moderated_at", { withTimezone: true }),
   // Moderation gate: admin must approve before it becomes public
   published: boolean("published").notNull().default(false),
 });
@@ -124,6 +128,9 @@ export const userEvents = pgTable("user_events", {
   description: text("description"),
   lat: doublePrecision("lat").notNull(),
   lng: doublePrecision("lng").notNull(),
+  moderationStatus: text("moderation_status").notNull().default("pending"),
+  moderationReason: text("moderation_reason"),
+  moderatedAt: timestamp("moderated_at", { withTimezone: true }),
   // Moderation gate: admin must approve before it becomes public
   published: boolean("published").notNull().default(false),
 });

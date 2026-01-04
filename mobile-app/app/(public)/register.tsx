@@ -1,11 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useQueryClient } from '@tanstack/react-query';
-import { authRegister } from '../../services/auth';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { authMe, authRegister } from '../../services/auth';
 import { useAppTheme } from '../../services/settingsTheme';
 import { Ionicons } from '@expo/vector-icons';
 import { PublicScaffold, usePrimaryTints } from '../../components/UI/PublicScaffold';
@@ -31,6 +31,27 @@ export default function RegisterScreen() {
   const [confirm, setConfirm] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const { data: me, isLoading: meLoading } = useQuery({
+    queryKey: ['auth-me'],
+    queryFn: () => authMe(),
+    staleTime: 1000 * 10,
+    retry: false,
+  });
+
+  // If already connected, do not show register again.
+  useEffect(() => {
+    if (meLoading) return;
+    if (!me) return;
+    if ((me as any)?.emailVerified === false) {
+      router.replace('/verify-email');
+      return;
+    }
+    const role = String((me as any)?.role || 'user');
+    if (role === 'admin') router.replace('/admin');
+    else if (role === 'establishment') router.replace('/business');
+    else router.replace('/map');
+  }, [me, meLoading, router]);
 
   const email = username.trim().toLowerCase();
   const passwordOk = password.length >= 6;
@@ -80,6 +101,10 @@ export default function RegisterScreen() {
       setLoading(false);
     }
   };
+
+  if (meLoading || !!me) {
+    return <SafeAreaView style={[styles.safe, { backgroundColor: t.bg }]} />;
+  }
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: t.bg }]}>

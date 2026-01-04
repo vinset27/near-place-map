@@ -183,9 +183,17 @@ export async function ensureAppTables() {
       description text,
       cover_url text,
       photos text[],
+      videos text[],
+      moderation_status text not null default 'pending',
+      moderation_reason text,
+      moderated_at timestamptz,
       published boolean not null default false
     );
   `);
+  await pool.query(`alter table events add column if not exists videos text[];`);
+  await pool.query(`alter table events add column if not exists moderation_status text not null default 'pending';`);
+  await pool.query(`alter table events add column if not exists moderation_reason text;`);
+  await pool.query(`alter table events add column if not exists moderated_at timestamptz;`);
   // Ensure moderation default even if table existed before.
   await pool.query(`alter table events alter column published set default false;`);
   await pool.query(`create index if not exists events_published_starts_at_idx on events (published, starts_at);`);
@@ -207,9 +215,15 @@ export async function ensureAppTables() {
       description text,
       lat double precision not null,
       lng double precision not null,
+      moderation_status text not null default 'pending',
+      moderation_reason text,
+      moderated_at timestamptz,
       published boolean not null default false
     );
   `);
+  await pool.query(`alter table user_events add column if not exists moderation_status text not null default 'pending';`);
+  await pool.query(`alter table user_events add column if not exists moderation_reason text;`);
+  await pool.query(`alter table user_events add column if not exists moderated_at timestamptz;`);
   // Ensure moderation default even if table existed before.
   await pool.query(`alter table user_events alter column published set default false;`);
   await pool.query(`create index if not exists user_events_published_starts_at_idx on user_events (published, starts_at);`);
@@ -276,6 +290,25 @@ export async function ensureAppTables() {
   await pool.query(`create index if not exists establishment_views_created_at_idx on establishment_views (created_at);`);
   await pool.query(`create index if not exists establishment_views_viewer_user_id_idx on establishment_views (viewer_user_id);`);
   await pool.query(`create index if not exists establishment_views_anon_id_idx on establishment_views (anon_id);`);
+
+  // Trips: persist every itinerary a user starts (including POIs not in DB).
+  await pool.query(`
+    create table if not exists user_trips (
+      id uuid primary key default gen_random_uuid(),
+      created_at timestamptz not null default now(),
+      user_id varchar not null,
+      mode text,
+      origin_lat double precision,
+      origin_lng double precision,
+      destination_type text not null default 'poi',
+      establishment_id uuid,
+      destination_name text,
+      destination_lat double precision,
+      destination_lng double precision
+    );
+  `);
+  await pool.query(`create index if not exists user_trips_user_id_created_at_idx on user_trips (user_id, created_at desc);`);
+  await pool.query(`create index if not exists user_trips_created_at_idx on user_trips (created_at desc);`);
 }
 
 

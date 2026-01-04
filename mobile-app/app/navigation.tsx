@@ -26,6 +26,7 @@ import type { Establishment } from '../types/establishment';
 import { isNavigationBackgroundTrackingRunning, setNavigationSession, startNavigationBackgroundTracking, stopNavigationBackgroundTracking } from '../services/navigationBackground';
 import api from '../services/api';
 import { VehiclePuck } from '../components/UI/VehiclePuck';
+import { createTrip } from '../services/trips';
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -83,6 +84,19 @@ export default function NavigationScreen() {
   const [nextTurn, setNextTurn] = useState<{ title: string; subtitle: string } | null>(null);
   const [nearbyHint, setNearbyHint] = useState<{ title: string; subtitle: string } | null>(null);
   const [autoHideGuide, setAutoHideGuide] = useState(true);
+  const didSaveTripRef = useRef(false);
+
+  // If not logged in, warn that the trip won't be saved.
+  useEffect(() => {
+    const me = qc.getQueryData(['auth-me']) as any;
+    if (me) return;
+    setNearbyHint({
+      title: 'Trajet non enregistré',
+      subtitle: "Connecte-toi pour enregistrer tes trajets dans ton dashboard.",
+    });
+    const id = setTimeout(() => setNearbyHint(null), 7000);
+    return () => clearTimeout(id);
+  }, [qc]);
 
   // Signal backend once: used to notify establishment owner ("someone started an itinerary to you").
   useEffect(() => {
@@ -100,6 +114,32 @@ export default function NavigationScreen() {
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, qc]);
+
+  // Save trip once when authenticated (after destination is known).
+  useEffect(() => {
+    if (didSaveTripRef.current) return;
+    const me = qc.getQueryData(['auth-me']) as any;
+    if (!me) return;
+    const dest = fallbackFromParams || establishment;
+    if (!dest) return;
+    const destLat = Number((dest as any)?.coordinates?.lat ?? (dest as any)?.lat);
+    const destLng = Number((dest as any)?.coordinates?.lng ?? (dest as any)?.lng);
+    if (!Number.isFinite(destLat) || !Number.isFinite(destLng)) return;
+    const origin = routeOrigin ?? userLocation;
+    if (!origin || !Number.isFinite(origin.lat) || !Number.isFinite(origin.lng)) return;
+
+    didSaveTripRef.current = true;
+    void createTrip({
+      mode: String(mode || ''),
+      originLat: origin.lat,
+      originLng: origin.lng,
+      destinationType: isUuidLike(String(id || '').trim()) ? 'establishment' : 'poi',
+      establishmentId: isUuidLike(String(id || '').trim()) ? String(id).trim() : undefined,
+      destinationName: String((dest as any)?.name || params.name || 'Destination'),
+      destinationLat: destLat,
+      destinationLng: destLng,
+    }).catch(() => {});
+  }, [establishment, fallbackFromParams, id, mode, params.name, qc, routeOrigin, userLocation]);
 
   const fallbackFromParams = useMemo((): Establishment | null => {
     const lat = Number(params.lat);

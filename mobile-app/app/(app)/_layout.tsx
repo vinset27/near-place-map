@@ -113,6 +113,13 @@ export default function AppTabsLayout() {
           href: null,
         }}
       />
+
+      <Tabs.Screen
+        name="trips"
+        options={{
+          href: null,
+        }}
+      />
     </Tabs>
   );
 }

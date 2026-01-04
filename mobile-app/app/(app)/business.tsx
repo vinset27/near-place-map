@@ -49,6 +49,7 @@ export default function BusinessScreen() {
   const contentItems: MenuItem[] = useMemo(
     () => [
       { key: 'dashboard', icon: '📊', title: 'Dashboard', subtitle: 'Statistiques, établissements, évènements', route: '/business-dashboard' },
+      { key: 'trips', icon: '🧭', title: 'Mes trajets', subtitle: 'Historique des itinéraires', route: '/trips', requireAuth: true },
       { key: 'profile', icon: '🏷️', title: 'Profil établissement', subtitle: 'Photo, réseaux, description, localisation', route: '/profile-establishment', requireAuth: true },
       { key: 'apply', icon: '📍', title: 'Déclarer un établissement', subtitle: 'Ajouter un lieu (validation)', route: '/business-apply', requireAuth: true },
       { key: 'event', icon: '📅', title: 'Créer un évènement', subtitle: 'Publier et attirer des visiteurs', route: '/event-create', requireAuth: true },

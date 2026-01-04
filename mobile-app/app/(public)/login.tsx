@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { useQueryClient } from '@tanstack/react-query';
-import { authLogin } from '../../services/auth';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { authLogin, authMe } from '../../services/auth';
 import { useAppTheme } from '../../services/settingsTheme';
 import { Ionicons } from '@expo/vector-icons';
 import { PublicScaffold, usePrimaryTints } from '../../components/UI/PublicScaffold';
@@ -20,6 +20,27 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const { data: me, isLoading: meLoading } = useQuery({
+    queryKey: ['auth-me'],
+    queryFn: () => authMe(),
+    staleTime: 1000 * 10,
+    retry: false,
+  });
+
+  // If already connected, do not show login again.
+  useEffect(() => {
+    if (meLoading) return;
+    if (!me) return;
+    if ((me as any)?.emailVerified === false) {
+      router.replace('/verify-email');
+      return;
+    }
+    const role = String((me as any)?.role || 'user');
+    if (role === 'admin') router.replace('/admin');
+    else if (role === 'establishment') router.replace('/business');
+    else router.replace('/map');
+  }, [me, meLoading, router]);
 
   const submit = async () => {
     setError(null);
@@ -45,6 +66,11 @@ export default function LoginScreen() {
       setLoading(false);
     }
   };
+
+  if (meLoading || !!me) {
+    // Keep a blank screen to avoid flicker while redirecting.
+    return <SafeAreaView style={[styles.safe, { backgroundColor: t.bg }]} />;
+  }
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: t.bg }]}>

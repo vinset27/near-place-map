@@ -14,6 +14,9 @@ export type ApiUserEvent = {
   lat: number;
   lng: number;
   published: boolean;
+  moderationStatus?: 'pending' | 'approved' | 'rejected' | string;
+  moderationReason?: string | null;
+  moderatedAt?: string | null;
   distanceMeters?: number;
   organizer?: { userId: string; name: string };
 };

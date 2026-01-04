@@ -57,6 +57,14 @@ export function makeObjectKey(originalName: string) {
   return `business/${stamp}-${rand}-${safe}`;
 }
 
+export function makeEventMediaKey(originalName: string, opts?: { userId?: string }) {
+  const safe = sanitizeFileName(originalName);
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const rand = crypto.randomBytes(8).toString("hex");
+  const user = opts?.userId ? sanitizeFileName(String(opts.userId)) : "anon";
+  return `events/${user}/${stamp}-${rand}-${safe}`;
+}
+
 export async function presignBusinessPhotoPut(params: {
   fileName: string;
   contentType: string;
@@ -65,6 +73,29 @@ export async function presignBusinessPhotoPut(params: {
   if (!r2) return null;
 
   const key = makeObjectKey(params.fileName);
+  const cmd = new PutObjectCommand({
+    Bucket: r2.config.bucket,
+    Key: key,
+    ContentType: params.contentType,
+  });
+
+  const url = await getSignedUrl(r2.client, cmd, { expiresIn: 60 * 5 });
+  const publicUrl = r2.config.publicBaseUrl
+    ? `${r2.config.publicBaseUrl.replace(/\/$/, "")}/${key}`
+    : undefined;
+
+  return { key, url, publicUrl };
+}
+
+export async function presignEventMediaPut(params: {
+  fileName: string;
+  contentType: string;
+  userId?: string;
+}) {
+  const r2 = getR2Client();
+  if (!r2) return null;
+
+  const key = makeEventMediaKey(params.fileName, { userId: params.userId });
   const cmd = new PutObjectCommand({
     Bucket: r2.config.bucket,
     Key: key,
