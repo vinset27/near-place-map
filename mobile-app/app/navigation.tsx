@@ -25,6 +25,7 @@ import type { RouteStep } from '../services/mapboxDirections';
 import type { Establishment } from '../types/establishment';
 import { isNavigationBackgroundTrackingRunning, setNavigationSession, startNavigationBackgroundTracking, stopNavigationBackgroundTracking } from '../services/navigationBackground';
 import api from '../services/api';
+import { VehiclePuck } from '../components/UI/VehiclePuck';
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -87,9 +88,18 @@ export default function NavigationScreen() {
   useEffect(() => {
     const estId = String(id || '').trim();
     if (!estId || !isUuidLike(estId)) return;
-    void api.post(`/api/analytics/establishments/${encodeURIComponent(estId)}/navigation-start`, { mode: String(initialMode || '') }).catch(() => {});
+    // Only when authenticated (avoid 401 noise; navigation must work even without login).
+    const me = qc.getQueryData(['auth-me']) as any;
+    if (!me) return;
+    void api
+      .post(
+        `/api/analytics/establishments/${encodeURIComponent(estId)}/navigation-start`,
+        { mode: String(initialMode || '') },
+        { headers: { 'X-NP-SILENT': '1' } },
+      )
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id, qc]);
 
   const fallbackFromParams = useMemo((): Establishment | null => {
     const lat = Number(params.lat);
@@ -119,6 +129,7 @@ export default function NavigationScreen() {
 
   const mapRef = useRef<MapView>(null);
   const lastLocRef = useRef<{ lat: number; lng: number } | null>(null);
+  const [headingDeg, setHeadingDeg] = useState(0);
   const [region, setRegion] = useState<Region>({
     latitude: userLocation.lat,
     longitude: userLocation.lng,
@@ -148,6 +159,7 @@ export default function NavigationScreen() {
         const last = lastLocRef.current;
         const heading = last ? bearingDeg(last, loc) : 0;
         lastLocRef.current = loc;
+        setHeadingDeg(heading);
         const altitude =
           mode === 'walking'
             ? 260
@@ -580,7 +592,8 @@ export default function NavigationScreen() {
         onRegionChangeComplete={setRegion}
         mapType="standard"
         onPanDrag={() => setFollowUser(false)}
-        showsUserLocation={hasPermission}
+        // Hide the default blue dot: we render a premium "vehicle puck" while navigation is active.
+        showsUserLocation={false}
         showsMyLocationButton={false}
         toolbarEnabled={false}
         pitchEnabled
@@ -588,6 +601,16 @@ export default function NavigationScreen() {
         showsBuildings
         showsTraffic={false}
       >
+        {hasPermission && (
+          <Marker
+            coordinate={{ latitude: userLocation.lat, longitude: userLocation.lng }}
+            anchor={{ x: 0.5, y: 0.5 }}
+            // We use subtle animations inside the puck; keep view changes enabled.
+            tracksViewChanges
+          >
+            <VehiclePuck headingDeg={headingDeg} mode={mode} />
+          </Marker>
+        )}
         <Marker
           coordinate={{ latitude: establishment.coordinates.lat, longitude: establishment.coordinates.lng }}
           title={establishment.name}

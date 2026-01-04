@@ -35,6 +35,7 @@ export default function BusinessScreen() {
   const isBackendError = !!meError && (meError as any)?.response?.status !== 401;
   const role = String((me as any)?.role || 'user');
   const isEstablishment = role === 'establishment' && (me as any)?.profileCompleted;
+  const isEstablishmentPending = role === 'establishment' && !(me as any)?.profileCompleted;
   const isAdmin = role === 'admin';
 
   const { data: proProfile } = useQuery({
@@ -88,12 +89,20 @@ export default function BusinessScreen() {
       <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
         <InAppHeroHeader
           heroImage={require('../../assets/bars.jpg')}
-          title="Espace utilisateur"
-          subtitle={isAuthed ? (isEstablishment ? 'Compte établissement' : 'Compte utilisateur') : 'Non connecté'}
+          title={isAdmin ? 'Espace admin' : 'Espace utilisateur'}
+          subtitle={isAuthed ? (isAdmin ? 'Tous les pouvoirs' : isEstablishment ? 'Compte établissement' : 'Compte utilisateur') : 'Non connecté'}
           badgeRight={
             isEstablishment ? (
               <View style={{ paddingHorizontal: 10, paddingVertical: 8, borderRadius: 999, backgroundColor: 'rgba(11,18,32,0.06)' }}>
                 <Text style={{ color: '#0b1220', fontWeight: '400', fontSize: 12 }}>🏪 Établissement</Text>
+              </View>
+            ) : isAdmin ? (
+              <View style={{ paddingHorizontal: 10, paddingVertical: 8, borderRadius: 999, backgroundColor: 'rgba(37,99,235,0.12)' }}>
+                <Text style={{ color: '#0b1220', fontWeight: '400', fontSize: 12 }}>🛡️ Admin</Text>
+              </View>
+            ) : isEstablishmentPending ? (
+              <View style={{ paddingHorizontal: 10, paddingVertical: 8, borderRadius: 999, backgroundColor: 'rgba(37,99,235,0.10)' }}>
+                <Text style={{ color: '#0b1220', fontWeight: '400', fontSize: 12 }}>🏪 À compléter</Text>
               </View>
             ) : null
           }
@@ -116,6 +125,24 @@ export default function BusinessScreen() {
             !isAuthed ? { label: 'Créer un compte', onPress: () => router.push('/register') } : undefined
           }
         />
+
+        {isAuthed && isEstablishmentPending && (
+          <View style={{ paddingHorizontal: 16, marginTop: 10 }}>
+            <View style={{ borderRadius: 18, borderWidth: 1, borderColor: 'rgba(37,99,235,0.22)', backgroundColor: 'rgba(37,99,235,0.10)', padding: 12 }}>
+              <Text style={{ color: '#0b1220', fontWeight: '900' }}>Compléter votre établissement</Text>
+              <Text style={{ marginTop: 4, color: 'rgba(11,18,32,0.70)', fontWeight: '700', fontSize: 12, lineHeight: 16 }}>
+                Tu peux remplir le profil de ton restaurant plus tard, mais certaines fonctions Pro resteront bloquées tant que ce n’est pas complété.
+              </Text>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={() => router.push({ pathname: '/post-register', params: { type: 'establishment' } } as any)}
+                style={{ marginTop: 10, alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 999, backgroundColor: '#0b1220' }}
+              >
+                <Text style={{ color: '#fff', fontWeight: '900', fontSize: 12 }}>Compléter maintenant</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
         <SearchBar value={q} onChangeText={setQ} placeholder="Rechercher…" />
 

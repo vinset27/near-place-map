@@ -2,9 +2,32 @@ import { Tabs } from 'expo-router';
 import { Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useAppTheme } from '../../services/settingsTheme';
+import { usePathname, useRouter } from 'expo-router';
+import { useQuery } from '@tanstack/react-query';
+import { authMe } from '../../services/auth';
+import React, { useEffect } from 'react';
 
 export default function AppTabsLayout() {
   const t = useAppTheme();
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const { data: me } = useQuery({
+    queryKey: ['auth-me'],
+    queryFn: () => authMe(),
+    staleTime: 1000 * 20,
+    retry: false,
+  });
+
+  // Always force unverified users to the single verification screen.
+  useEffect(() => {
+    if (!me) return;
+    if ((me as any)?.emailVerified === false) {
+      // Keep 'next' so we can return after verification.
+      router.replace({ pathname: '/verify-email', params: { next: pathname } } as any);
+    }
+  }, [me, pathname, router]);
+
   return (
     <Tabs
       screenOptions={{

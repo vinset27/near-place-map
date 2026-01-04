@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ScrollView, View, Text, TouchableOpacity, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { authMe, changePassword, requestPasswordReset, resetPassword } from '../../services/auth';
+import { authMe, confirmPasswordChange, requestPasswordChangeCode, requestPasswordReset, resetPassword } from '../../services/auth';
 import { useAppTheme } from '../../services/settingsTheme';
 import { InlineToast, SettingsScreenShell, SettingsSection } from '../../components/Settings/SettingsPrimitives';
 import { PublicScaffold, usePrimaryTints } from '../../components/UI/PublicScaffold';
@@ -17,8 +17,9 @@ export default function ChangePasswordScreen() {
   const [toast, setToast] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Logged-in change password
-  const [currentPassword, setCurrentPassword] = useState('');
+  // Logged-in change password (code flow)
+  const [changeStep, setChangeStep] = useState<'request' | 'confirm'>('request');
+  const [changeCode, setChangeCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNew, setConfirmNew] = useState('');
 
@@ -41,17 +42,32 @@ export default function ChangePasswordScreen() {
     setEmail(String(me.email || me.username || '').trim());
   }, [me]);
 
-  const submitChange = async () => {
-    if (newPassword.trim().length < 6) return setToast('Mot de passe trop court (6 caractères minimum).');
-    if (newPassword !== confirmNew) return setToast('Les mots de passe ne correspondent pas.');
-    if (currentPassword.trim().length < 6) return setToast('Mot de passe actuel requis.');
+  const requestChangeCode = async () => {
     setLoading(true);
     try {
-      await changePassword({ currentPassword, newPassword });
+      await requestPasswordChangeCode();
+      setToast('Code envoyé par email.');
+      setChangeStep('confirm');
+    } catch (e: any) {
+      setToast(String(e?.response?.data?.message || e?.message || 'Erreur'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitChange = async () => {
+    const c = String(changeCode).trim();
+    if (!/^\d{6}$/.test(c)) return setToast('Code invalide (6 chiffres).');
+    if (newPassword.trim().length < 6) return setToast('Mot de passe trop court (6 caractères minimum).');
+    if (newPassword !== confirmNew) return setToast('Les mots de passe ne correspondent pas.');
+    setLoading(true);
+    try {
+      await confirmPasswordChange({ code: c, newPassword });
       setToast('Mot de passe modifié.');
-      setCurrentPassword('');
+      setChangeCode('');
       setNewPassword('');
       setConfirmNew('');
+      setChangeStep('request');
       await qc.invalidateQueries({ queryKey: ['auth-me'] });
     } catch (e: any) {
       setToast(String(e?.response?.data?.message || e?.message || 'Erreur'));
@@ -209,47 +225,85 @@ export default function ChangePasswordScreen() {
         {isAuthed ? (
           <SettingsSection title="Changer mot de passe (connecté)">
             <View style={{ paddingHorizontal: 14, paddingVertical: 14, gap: 12 }}>
-              <View>
-                <Text style={{ color: t.muted, fontWeight: '900' }}>Mot de passe actuel</Text>
-                <TextInput
-                  value={currentPassword}
-                  onChangeText={setCurrentPassword}
-                  placeholder="••••••••"
-                  placeholderTextColor={t.muted}
-                  secureTextEntry
-                  style={{ marginTop: 8, backgroundColor: t.input, borderColor: t.border, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 12, color: t.text, fontWeight: '800' }}
-                />
-              </View>
-              <View>
-                <Text style={{ color: t.muted, fontWeight: '900' }}>Nouveau mot de passe</Text>
-                <TextInput
-                  value={newPassword}
-                  onChangeText={setNewPassword}
-                  placeholder="6 caractères minimum"
-                  placeholderTextColor={t.muted}
-                  secureTextEntry
-                  style={{ marginTop: 8, backgroundColor: t.input, borderColor: t.border, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 12, color: t.text, fontWeight: '800' }}
-                />
-              </View>
-              <View>
-                <Text style={{ color: t.muted, fontWeight: '900' }}>Confirmer</Text>
-                <TextInput
-                  value={confirmNew}
-                  onChangeText={setConfirmNew}
-                  placeholder="Répéter"
-                  placeholderTextColor={t.muted}
-                  secureTextEntry
-                  style={{ marginTop: 8, backgroundColor: t.input, borderColor: t.border, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 12, color: t.text, fontWeight: '800' }}
-                />
-              </View>
-              <TouchableOpacity
-                disabled={loading}
-                onPress={submitChange}
-                style={{ opacity: loading ? 0.75 : 1, backgroundColor: t.primary, borderRadius: 14, paddingVertical: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 10 }}
-              >
-                {loading ? <ActivityIndicator color="#fff" /> : null}
-                <Text style={{ color: '#fff', fontWeight: '900' }}>{loading ? '…' : 'Mettre à jour'}</Text>
-              </TouchableOpacity>
+              {changeStep === 'request' && (
+                <>
+                  <Text style={{ color: t.muted, fontWeight: '800', lineHeight: 18 }}>
+                    Un code va être envoyé à votre email ({String((me as any)?.email || (me as any)?.username || '—')}).
+                  </Text>
+
+                  <TouchableOpacity
+                    disabled={loading}
+                    onPress={requestChangeCode}
+                    style={{ opacity: loading ? 0.75 : 1, backgroundColor: t.primary, borderRadius: 14, paddingVertical: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 10 }}
+                  >
+                    {loading ? <ActivityIndicator color="#fff" /> : null}
+                    <Text style={{ color: '#fff', fontWeight: '900' }}>{loading ? '…' : 'Envoyer le code'}</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+
+              {changeStep === 'confirm' && (
+                <>
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    onPress={() => {
+                      setChangeStep('request');
+                      setChangeCode('');
+                      setNewPassword('');
+                      setConfirmNew('');
+                    }}
+                    style={{ alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: 10 }}
+                  >
+                    <Text style={{ color: t.muted, fontWeight: '800' }}>← Changer d’email / renvoyer</Text>
+                  </TouchableOpacity>
+
+                  <View>
+                    <Text style={{ color: t.muted, fontWeight: '900' }}>Code (6 chiffres)</Text>
+                    <TextInput
+                      value={changeCode}
+                      onChangeText={(v) => setChangeCode(String(v || '').replace(/\D/g, '').slice(0, 6))}
+                      placeholder="123456"
+                      placeholderTextColor={t.muted}
+                      keyboardType="number-pad"
+                      maxLength={6}
+                      style={{ marginTop: 8, backgroundColor: t.input, borderColor: t.border, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 12, color: t.text, fontWeight: '800' }}
+                    />
+                  </View>
+
+                  <View>
+                    <Text style={{ color: t.muted, fontWeight: '900' }}>Nouveau mot de passe</Text>
+                    <TextInput
+                      value={newPassword}
+                      onChangeText={setNewPassword}
+                      placeholder="6 caractères minimum"
+                      placeholderTextColor={t.muted}
+                      secureTextEntry
+                      style={{ marginTop: 8, backgroundColor: t.input, borderColor: t.border, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 12, color: t.text, fontWeight: '800' }}
+                    />
+                  </View>
+
+                  <View>
+                    <Text style={{ color: t.muted, fontWeight: '900' }}>Confirmer</Text>
+                    <TextInput
+                      value={confirmNew}
+                      onChangeText={setConfirmNew}
+                      placeholder="Répéter"
+                      placeholderTextColor={t.muted}
+                      secureTextEntry
+                      style={{ marginTop: 8, backgroundColor: t.input, borderColor: t.border, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 12, color: t.text, fontWeight: '800' }}
+                    />
+                  </View>
+
+                  <TouchableOpacity
+                    disabled={loading}
+                    onPress={submitChange}
+                    style={{ opacity: loading ? 0.75 : 1, backgroundColor: t.primary, borderRadius: 14, paddingVertical: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 10 }}
+                  >
+                    {loading ? <ActivityIndicator color="#fff" /> : null}
+                    <Text style={{ color: '#fff', fontWeight: '900' }}>{loading ? '…' : 'Mettre à jour'}</Text>
+                  </TouchableOpacity>
+                </>
+              )}
             </View>
           </SettingsSection>
         ) : (

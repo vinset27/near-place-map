@@ -6,7 +6,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAppTheme } from '../../services/settingsTheme';
 import { authMe } from '../../services/auth';
-import { approveProEvent, approveUserEvent, fetchPendingModeration, rejectProEvent, rejectUserEvent } from '../../services/admin';
+import { adminCreateUser, approveEstablishment, approveProEvent, approveUserEvent, fetchPendingModeration, rejectEstablishment, rejectProEvent, rejectUserEvent, setUserRole } from '../../services/admin';
+import { resendTestEmail } from '../../services/admin';
 
 const KEY = 'nearplace:adminToken:v1';
 
@@ -15,6 +16,12 @@ export default function AdminScreen() {
   const qc = useQueryClient();
   const t = useAppTheme();
   const [token, setToken] = useState('');
+  const [testTo, setTestTo] = useState('');
+  const [roleLogin, setRoleLogin] = useState('');
+  const [roleValue, setRoleValue] = useState<'user' | 'establishment' | 'admin'>('user');
+  const [createEmail, setCreateEmail] = useState('');
+  const [createPassword, setCreatePassword] = useState('');
+  const [createRole, setCreateRole] = useState<'user' | 'establishment' | 'admin'>('user');
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -45,6 +52,7 @@ export default function AdminScreen() {
     retry: false,
   });
 
+  const pendingEsts = useMemo(() => (data as any)?.pending?.establishments || [], [data]);
   const pendingEvents = useMemo(() => (data as any)?.pending?.events || [], [data]);
   const pendingUserEvents = useMemo(() => (data as any)?.pending?.userEvents || [], [data]);
 
@@ -121,11 +129,191 @@ export default function AdminScreen() {
         </View>
 
         <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}>
+          <Text style={[styles.cardTitle, { color: t.text }]}>Test email (Resend)</Text>
+          <Text style={[styles.cardText, { color: t.muted }]}>
+            Envoie un email test via Resend pour vérifier la configuration (clé + domaine).
+          </Text>
+          <TextInput
+            value={testTo}
+            onChangeText={setTestTo}
+            placeholder="email@exemple.com"
+            placeholderTextColor={t.muted}
+            style={[styles.input, { backgroundColor: t.input, borderColor: t.border, color: t.text }]}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="email-address"
+          />
+          <TouchableOpacity
+            style={[styles.primary, { backgroundColor: t.primary }]}
+            onPress={async () => {
+              const email = String(testTo || '').trim();
+              if (!email.includes('@')) {
+                setToast('Email invalide.');
+                return;
+              }
+              try {
+                const out = await resendTestEmail(email, effectiveToken);
+                Alert.alert('Resend', out?.ok ? `Email envoyé ✅\nID: ${String(out?.id || '—')}` : 'Échec');
+              } catch (e: any) {
+                Alert.alert('Resend', String(e?.response?.data?.message || e?.message || 'Erreur'));
+              }
+            }}
+          >
+            <Text style={styles.primaryText}>Envoyer un test</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}>
+          <Text style={[styles.cardTitle, { color: t.text }]}>Gestion utilisateurs</Text>
+          <Text style={[styles.cardText, { color: t.muted }]}>Créer un utilisateur ou changer son rôle (user / establishment / admin).</Text>
+
+          <Text style={[styles.kicker, { color: t.muted, marginTop: 8 }]}>Changer rôle</Text>
+          <TextInput
+            value={roleLogin}
+            onChangeText={setRoleLogin}
+            placeholder="email ou username"
+            placeholderTextColor={t.muted}
+            style={[styles.input, { backgroundColor: t.input, borderColor: t.border, color: t.text }]}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+            {(['user', 'establishment', 'admin'] as const).map((r) => (
+              <TouchableOpacity
+                key={r}
+                style={[
+                  styles.ghost,
+                  { backgroundColor: roleValue === r ? t.primary : t.input, borderColor: t.border, flex: 1 },
+                ]}
+                onPress={() => setRoleValue(r)}
+              >
+                <Text style={[styles.ghostText, { color: roleValue === r ? '#fff' : t.text }]}>{r}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <TouchableOpacity
+            style={[styles.primary, { backgroundColor: t.primary, marginTop: 10 }]}
+            onPress={async () => {
+              const login = String(roleLogin || '').trim();
+              if (!login) return setToast('Login requis.');
+              try {
+                await setUserRole(login, roleValue, effectiveToken);
+                setToast('Rôle mis à jour.');
+              } catch (e: any) {
+                Alert.alert('Admin', String(e?.response?.data?.message || e?.message || 'Erreur'));
+              }
+            }}
+          >
+            <Text style={styles.primaryText}>Appliquer</Text>
+          </TouchableOpacity>
+
+          <Text style={[styles.kicker, { color: t.muted, marginTop: 14 }]}>Créer utilisateur</Text>
+          <TextInput
+            value={createEmail}
+            onChangeText={setCreateEmail}
+            placeholder="email@exemple.com"
+            placeholderTextColor={t.muted}
+            style={[styles.input, { backgroundColor: t.input, borderColor: t.border, color: t.text }]}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="email-address"
+          />
+          <TextInput
+            value={createPassword}
+            onChangeText={setCreatePassword}
+            placeholder="mot de passe"
+            placeholderTextColor={t.muted}
+            style={[styles.input, { backgroundColor: t.input, borderColor: t.border, color: t.text, marginTop: 10 }]}
+            secureTextEntry
+          />
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+            {(['user', 'establishment', 'admin'] as const).map((r) => (
+              <TouchableOpacity
+                key={r}
+                style={[
+                  styles.ghost,
+                  { backgroundColor: createRole === r ? t.primary : t.input, borderColor: t.border, flex: 1 },
+                ]}
+                onPress={() => setCreateRole(r)}
+              >
+                <Text style={[styles.ghostText, { color: createRole === r ? '#fff' : t.text }]}>{r}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <TouchableOpacity
+            style={[styles.primary, { backgroundColor: t.primary, marginTop: 10 }]}
+            onPress={async () => {
+              const email = String(createEmail || '').trim();
+              const pw = String(createPassword || '');
+              if (!email.includes('@')) return setToast('Email invalide.');
+              if (pw.length < 6) return setToast('Mot de passe trop court.');
+              try {
+                await adminCreateUser({ email, password: pw, role: createRole }, effectiveToken);
+                setToast('Utilisateur créé.');
+                setCreateEmail('');
+                setCreatePassword('');
+              } catch (e: any) {
+                Alert.alert('Admin', String(e?.response?.data?.message || e?.message || 'Erreur'));
+              }
+            }}
+          >
+            <Text style={styles.primaryText}>Créer</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}>
           <Text style={[styles.cardTitle, { color: t.text }]}>En attente</Text>
           {isLoading ? <Text style={[styles.cardText, { color: t.muted }]}>Chargement…</Text> : null}
           {!!error ? <Text style={[styles.cardText, { color: t.muted }]}>{String((error as any)?.message || error)}</Text> : null}
 
           <View style={{ marginTop: 10 }}>
+            <Text style={[styles.kicker, { color: t.muted }]}>Établissements</Text>
+            {pendingEsts.length === 0 ? (
+              <Text style={[styles.cardText, { color: t.muted }]}>— Aucun</Text>
+            ) : (
+              pendingEsts.slice(0, 80).map((est: any) => (
+                <View key={String(est.id)} style={[styles.row, { borderColor: t.border }]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: t.text, fontWeight: '950' }} numberOfLines={1}>
+                      {String(est.name || '—')}
+                    </Text>
+                    <Text style={{ color: t.muted, fontWeight: '800', marginTop: 4 }} numberOfLines={2}>
+                      {String(est.category || '—')} • {String(est.commune || est.address || '—')} • {est.owner?.name || '—'}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.approve, { backgroundColor: 'rgba(34,197,94,0.16)', borderColor: 'rgba(34,197,94,0.30)' }]}
+                    onPress={async () => {
+                      await approveEstablishment(String(est.id), effectiveToken);
+                      setToast('Approuvé.');
+                      await qc.invalidateQueries({ queryKey: ['admin-pending'] });
+                    }}
+                  >
+                    <Text style={{ color: '#22c55e', fontWeight: '950' }}>✓</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.reject, { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.26)' }]}
+                    onPress={async () => {
+                      const ok = await new Promise<boolean>((resolve) => {
+                        Alert.alert('Rejeter', 'Supprimer cet établissement ?', [
+                          { text: 'Annuler', style: 'cancel', onPress: () => resolve(false) },
+                          { text: 'Supprimer', style: 'destructive', onPress: () => resolve(true) },
+                        ]);
+                      });
+                      if (!ok) return;
+                      await rejectEstablishment(String(est.id), effectiveToken);
+                      setToast('Rejeté.');
+                      await qc.invalidateQueries({ queryKey: ['admin-pending'] });
+                    }}
+                  >
+                    <Text style={{ color: '#ef4444', fontWeight: '950' }}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
+          </View>
+
+          <View style={{ marginTop: 14 }}>
             <Text style={[styles.kicker, { color: t.muted }]}>Événements établissements</Text>
             {pendingEvents.length === 0 ? (
               <Text style={[styles.cardText, { color: t.muted }]}>— Aucun</Text>

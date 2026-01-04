@@ -47,6 +47,7 @@ import Constants from 'expo-constants';
 import { useSettingsStore } from '../../stores/useSettingsStore';
 import { Linking } from 'react-native';
 import LottieView from 'lottie-react-native';
+import { syncExpoPushTokenLocation } from '../../services/notifications';
 
 const { height } = Dimensions.get('window');
 const APP_LOGO = require('../../assets/icon.png');
@@ -85,11 +86,9 @@ export default function MapScreen() {
   const userLocation = useCurrentLocation();
   const rawUserLocation = useLocationStore((s) => s.userLocation);
   const stableOrigin = useStableQueryOrigin(userLocation);
-  // Use real GPS point immediately when available to avoid first fetch from DEFAULT_LOCATION.
-  const origin = useMemo(() => {
-    if (rawUserLocation) return { lat: round4(rawUserLocation.lat), lng: round4(rawUserLocation.lng) };
-    return stableOrigin;
-  }, [rawUserLocation, stableOrigin]);
+  // IMPORTANT: use a stabilized origin for API queries to avoid refetching on every GPS tick.
+  // Queries are already gated by `canQuery` so we won't fetch from DEFAULT_LOCATION when GPS is expected.
+  const origin = stableOrigin;
   const { setUserLocation, setIsTracking, hasPermission } = useLocationStore();
   const insets = useSafeAreaInsets();
   const tabBarOffset = 62; // defined in (app)/_layout.tsx
@@ -102,6 +101,14 @@ export default function MapScreen() {
     staleTime: 1000 * 20,
     retry: false,
   });
+
+  // Keep backend updated with last known device location (for nearby notifications).
+  useEffect(() => {
+    const isAuthed = !!me;
+    if (!isAuthed) return;
+    if (!userLocation || !Number.isFinite(userLocation.lat) || !Number.isFinite(userLocation.lng)) return;
+    void syncExpoPushTokenLocation({ lat: userLocation.lat, lng: userLocation.lng });
+  }, [me, userLocation?.lat, userLocation?.lng]);
   const isEstablishment = !!me && (me as any)?.role === 'establishment' && !!(me as any)?.profileCompleted;
   const isAuthed = !!me;
 
@@ -239,7 +246,9 @@ export default function MapScreen() {
     queryKey: ['user-events', origin.lat, origin.lng, radiusKm],
     enabled: canQuery && showUserEvents,
     queryFn: () => fetchUserEventsNearby({ lat: origin.lat, lng: origin.lng, radiusKm, withinHours: 72, limit: 350 }),
-    staleTime: 1000 * 15,
+    staleTime: 1000 * 60,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
     retry: false,
   });
 
@@ -415,6 +424,29 @@ export default function MapScreen() {
           if (!addOpen) return;
           const c = e.nativeEvent.coordinate;
           setDraft((d) => ({ ...d, lat: c.latitude, lng: c.longitude }));
+        }}
+        // Google Maps POIs (Android): allow itinerary even for places not in our DB.
+        // @ts-ignore - onPoiClick exists on Google provider but may not be in typings.
+        onPoiClick={(e: any) => {
+          try {
+            const c = e?.nativeEvent?.coordinate;
+            const name = String(e?.nativeEvent?.name || 'Destination');
+            if (!c || !Number.isFinite(c.latitude) || !Number.isFinite(c.longitude)) return;
+            setSelectedMarker(null);
+            setSelectedUserEventId(null);
+            setPanelOpen(false);
+            Keyboard.dismiss();
+            router.push({
+              pathname: '/navigation',
+              params: {
+                mode: 'driving',
+                lat: String(c.latitude),
+                lng: String(c.longitude),
+                name,
+                category: 'other',
+              },
+            } as any);
+          } catch {}
         }}
       >
         {/* User events (meetups/parties) */}

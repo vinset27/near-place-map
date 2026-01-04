@@ -21,7 +21,7 @@ export default function SettingsFaq() {
       },
       {
         q: "Je n'arrive pas à accéder au dashboard Pro",
-        a: 'Confirmez votre email. Dans /pro, appuyez sur “Renvoyer l’email” si besoin.',
+        a: 'Confirmez votre email depuis la page de vérification (code à 6 chiffres).',
       },
       {
         q: 'Le backend est lent (cold start)',

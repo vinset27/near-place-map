@@ -12,13 +12,8 @@ export default function SettingsHelp() {
 
   const mail = async (subject: string, body: string) => {
     await Linking.openURL(
-      `mailto:mapper-oshow@binarysecurity.com?subject=${encodeURIComponent(`${appName} — ${subject}`)}&body=${encodeURIComponent(body)}`
+      `mailto:mapper-oshow@binary-security.com?subject=${encodeURIComponent(`${appName} — ${subject}`)}&body=${encodeURIComponent(body)}`
     );
-  };
-
-  const openWhatsApp = async () => {
-    const text = encodeURIComponent(`${appName} — Support\n\nBonjour, j’ai besoin d’aide.`);
-    await Linking.openURL(`whatsapp://send?text=${text}`);
   };
 
   return (
@@ -28,19 +23,17 @@ export default function SettingsHelp() {
           <SettingsRow icon="📚" title="Centre d’aide (FAQ)" subtitle="Réponses rapides (dans l’app)" onPress={() => router.push('/settings/faq')} />
           <Divider />
           <View style={{ paddingHorizontal: 14, paddingVertical: 14 }}>
-            <Text style={{ color: t.text, fontWeight: '900', marginBottom: 6 }}>FAQ</Text>
+            <Text style={{ color: t.text, fontWeight: '900', marginBottom: 6 }}>Conseils rapides</Text>
             <Text style={{ color: t.muted, fontWeight: '800', lineHeight: 18 }}>
-              - Je ne vois pas mon établissement: vérifiez la localisation et le statut Pro.{'\n'}
-              - L’API est lente: attendez 20–30s (cold start) puis réessayez.{'\n'}
-              - Email non confirmé: renvoyez l’email depuis /pro.
+              - Publication: un contenu peut être “en attente” jusqu’à validation admin.{'\n'}
+              - Email non confirmé: vérifiez depuis l’écran “Confirmer l’email”.{'\n'}
+              - Notifications: nécessitent une dev build / app store (Expo Go est limité).
             </Text>
           </View>
         </SettingsSection>
 
         <SettingsSection title="Support">
           <SettingsRow icon="✉️" title="Contacter le support (email)" subtitle="Réponse rapide, sécurisé" onPress={() => mail('Support', 'Bonjour,\n\nJe rencontre un problème :\n\nDétails :\n')} />
-          <Divider />
-          <SettingsRow icon="💬" title="Contacter le support (WhatsApp)" subtitle="Chat" onPress={openWhatsApp} />
           <Divider />
           <SettingsRow
             icon="🐞"

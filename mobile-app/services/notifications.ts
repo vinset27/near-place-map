@@ -6,6 +6,8 @@ import api from './api';
 
 const KEY_PUSH = 'nearplace:expoPushToken:v1';
 const KEY_PUSH_SYNC = 'nearplace:expoPushToken:syncedAt:v1';
+const KEY_PUSH_LOC_SYNC = 'nearplace:expoPushToken:locSyncedAt:v1';
+const KEY_PUSH_LOC_LAST = 'nearplace:expoPushToken:lastLoc:v1';
 
 let handlerSet = false;
 
@@ -114,12 +116,48 @@ export async function registerForExpoPushToken(): Promise<string | null> {
   return null;
 }
 
+export async function syncExpoPushTokenLocation(params: { lat: number; lng: number }) {
+  // Only meaningful when we have a real push token (dev build / production) and the user is logged in.
+  const token = await getSavedExpoPushToken();
+  if (!token) return;
+
+  const lat = Number(params.lat);
+  const lng = Number(params.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+  // Throttle: at most every 30 minutes, unless location moved significantly.
+  const lastAt = Number(await AsyncStorage.getItem(KEY_PUSH_LOC_SYNC).catch(() => '0')) || 0;
+  const lastLocRaw = await AsyncStorage.getItem(KEY_PUSH_LOC_LAST).catch(() => null);
+  let movedFar = true;
+  try {
+    const last = lastLocRaw ? JSON.parse(lastLocRaw) : null;
+    if (last && Number.isFinite(Number(last.lat)) && Number.isFinite(Number(last.lng))) {
+      const d = Math.hypot((Number(last.lat) - lat) * 111_320, (Number(last.lng) - lng) * 111_320);
+      movedFar = d > 600; // >600m
+    }
+  } catch {
+    // ignore
+  }
+  if (!movedFar && Date.now() - lastAt < 30 * 60 * 1000) return;
+
+  await api
+    .post('/api/notifications/push-token', {
+      token,
+      platform: Platform.OS,
+      lat,
+      lng,
+    })
+    .catch(() => {});
+  await AsyncStorage.setItem(KEY_PUSH_LOC_SYNC, String(Date.now())).catch(() => {});
+  await AsyncStorage.setItem(KEY_PUSH_LOC_LAST, JSON.stringify({ lat, lng })).catch(() => {});
+}
+
 export async function scheduleTestNotification(params?: { title?: string; body?: string }) {
   ensureNotificationHandler();
   const title = params?.title || "O'Show — Notification test";
   const body = params?.body || 'Les notifications sont bien configurées ✅';
   await Notifications.scheduleNotificationAsync({
-    content: { title, body, sound: true },
+    content: { title, body, sound: 'default' as any },
     trigger: { seconds: 1 },
   });
 }

@@ -68,5 +68,10 @@ export async function upsertProProfile(input: {
   return res.data as any;
 }
 
+export async function setRoleIntent(role: 'user' | 'establishment'): Promise<{ user: AuthUser }> {
+  const res = await api.post('/api/profile/intent', { role });
+  return res.data as any;
+}
+
 
 

@@ -22,8 +22,13 @@ export const users = pgTable("users", {
   emailVerified: boolean("email_verified").notNull().default(false),
   emailVerificationToken: text("email_verification_token"),
   emailVerificationSentAt: timestamp("email_verification_sent_at", { withTimezone: true }),
+  // New: email verification via code (preferred in mobile)
+  emailVerificationCode: text("email_verification_code"),
   passwordResetCode: text("password_reset_code"),
   passwordResetSentAt: timestamp("password_reset_sent_at", { withTimezone: true }),
+  // New: logged-in password change via code (2-step)
+  passwordChangeCode: text("password_change_code"),
+  passwordChangeSentAt: timestamp("password_change_sent_at", { withTimezone: true }),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
@@ -83,7 +88,9 @@ export const establishments = pgTable("establishments", {
   // External provider import (e.g. Google Places)
   provider: text("provider"),
   providerPlaceId: text("provider_place_id"),
-  published: boolean("published").notNull().default(true),
+  // Moderation gate: admin must approve before it becomes public (manual submissions).
+  // Imports/admin-approved items can still explicitly set published=true.
+  published: boolean("published").notNull().default(false),
 });
 
 // Events published by establishments (Pro)

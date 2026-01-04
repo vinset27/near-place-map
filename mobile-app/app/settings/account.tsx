@@ -25,6 +25,7 @@ export default function SettingsAccount() {
   });
 
   const isAuthed = !!me;
+  const isEmailVerified = !!me && (me as any)?.emailVerified !== false;
 
   const { data: profile, isLoading: profileLoading } = useQuery({
     queryKey: ['pro-profile'],
@@ -143,6 +144,7 @@ export default function SettingsAccount() {
                 <Text style={{ color: t.muted, fontWeight: '900', marginBottom: 6 }}>Email</Text>
                 <Text style={{ color: t.text, fontWeight: '900', fontSize: 16 }}>{me?.email || me?.username || '—'}</Text>
                 <Text style={{ color: t.muted, fontWeight: '800', marginTop: 6 }}>Rôle: {roleLabel}</Text>
+                {!isEmailVerified && <Text style={{ color: t.muted, fontWeight: '800', marginTop: 8 }}>Email non vérifié</Text>}
               </View>
               <Divider />
               <SettingsRow icon="✉️" title="Modifier email" subtitle="Changement via support (sécurisé)" onPress={() => router.push('/settings/change-email')} />

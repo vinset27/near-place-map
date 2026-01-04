@@ -11,6 +11,8 @@ import { createEvent } from '../../services/events';
 import { PlaceImage } from '../../components/UI/PlaceImage';
 import { authMe } from '../../services/auth';
 import { fetchMyEstablishments } from '../../services/pro';
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import Constants from 'expo-constants';
 
 function presetIso(kind: '2h' | 'tonight' | 'tomorrow'): string {
   const now = new Date();
@@ -84,6 +86,12 @@ export default function EventCreateScreen() {
 
   const rows = (establishments || []) as any[];
 
+  const isExpoGo = (Constants as any)?.appOwnership === 'expo';
+  const useGoogleProvider = Platform.OS === 'android' || (Platform.OS === 'ios' && !isExpoGo);
+  const selectedLat = Number((selected as any)?.lat);
+  const selectedLng = Number((selected as any)?.lng);
+  const canShowMap = Number.isFinite(selectedLat) && Number.isFinite(selectedLng);
+
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -127,6 +135,32 @@ export default function EventCreateScreen() {
             </View>
             <Text style={styles.hint}>Début: {new Date(startsAt).toLocaleString()}</Text>
           </View>
+
+          {canShowMap && (
+            <View style={[styles.card, { marginTop: 0 }]}>
+              <Text style={styles.label}>Localisation (carte)</Text>
+              <Text style={styles.hint}>Position basée sur l’établissement sélectionné • votre position est aussi affichée.</Text>
+              <View style={styles.mapWrap}>
+                <MapView
+                  provider={useGoogleProvider ? PROVIDER_GOOGLE : undefined}
+                  style={StyleSheet.absoluteFill}
+                  initialRegion={{
+                    latitude: selectedLat,
+                    longitude: selectedLng,
+                    latitudeDelta: 0.02,
+                    longitudeDelta: 0.02,
+                  }}
+                  rotateEnabled={false}
+                  pitchEnabled={false}
+                >
+                  <Marker coordinate={{ latitude: selectedLat, longitude: selectedLng }} title={String((selected as any)?.name || 'Établissement')} />
+                  {Number.isFinite(origin?.lat) && Number.isFinite(origin?.lng) && (
+                    <Marker coordinate={{ latitude: Number(origin.lat), longitude: Number(origin.lng) }} title="Vous" />
+                  )}
+                </MapView>
+              </View>
+            </View>
+          )}
 
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Choisir un établissement</Text>
@@ -225,6 +259,7 @@ const styles = StyleSheet.create({
   submitDisabled: { backgroundColor: '#cbd5e1' },
   submitText: { color: '#fff', fontWeight: '950' },
   submitTextDisabled: { color: '#475569' },
+  mapWrap: { height: 180, borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: '#e2e8f0', marginTop: 10 },
 });
 
 

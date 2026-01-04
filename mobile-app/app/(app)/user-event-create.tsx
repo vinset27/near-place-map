@@ -1,10 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAppTheme } from '../../services/settingsTheme';
-import { authMe, resendEmailVerification } from '../../services/auth';
+import { authMe } from '../../services/auth';
 import { useCurrentLocation } from '../../stores/useLocationStore';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import Constants from 'expo-constants';
@@ -27,6 +27,13 @@ export default function UserEventCreateScreen() {
   });
   const isAuthed = !!me;
   const isEmailVerified = !!me && (me as any)?.emailVerified !== false;
+
+  // Centralize verification UI on /verify-email only.
+  useEffect(() => {
+    if (isAuthed && !isEmailVerified) {
+      router.replace('/verify-email');
+    }
+  }, [isAuthed, isEmailVerified, router]);
 
   const titlePreset = kind === 'party' ? 'Soirée' : 'Point de rencontre';
   const [title, setTitle] = useState(titlePreset);
@@ -103,23 +110,8 @@ export default function UserEventCreateScreen() {
 
         {isAuthed && !isEmailVerified && (
           <View style={[styles.box, { backgroundColor: t.card, borderColor: t.border }]}>
-            <Text style={[styles.boxTitle, { color: t.text }]}>Confirmer votre email</Text>
-            <Text style={[styles.boxText, { color: t.muted }]}>
-              Pour publier, vous devez confirmer votre email. Regardez votre boîte mail puis cliquez sur le lien.
-            </Text>
-            <TouchableOpacity
-              style={[styles.primary, { backgroundColor: t.primary }]}
-              onPress={async () => {
-                try {
-                  await resendEmailVerification();
-                  Alert.alert('Envoyé', 'Email de confirmation renvoyé. Vérifie ta boîte mail.', [{ text: 'OK' }]);
-                } catch (e: any) {
-                  Alert.alert('Erreur', String(e?.message || 'Impossible'), [{ text: 'OK' }]);
-                }
-              }}
-            >
-              <Text style={styles.primaryText}>Renvoyer l’email</Text>
-            </TouchableOpacity>
+            <Text style={[styles.boxTitle, { color: t.text }]}>Email non vérifié</Text>
+            <Text style={[styles.boxText, { color: t.muted }]}>Redirection vers la page de vérification…</Text>
           </View>
         )}
 

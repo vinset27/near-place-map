@@ -1,18 +1,30 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQueryClient } from '@tanstack/react-query';
 import { PublicScaffold, usePrimaryTints } from '../../components/UI/PublicScaffold';
-import { upsertProProfile } from '../../services/pro';
+import { setRoleIntent, upsertProProfile } from '../../services/pro';
 import { DEFAULT_LOCATION } from '../../services/location';
 
 const HERO_IMAGE = require('../../assets/119589243_10178365.jpg');
 
 const KEY_REFERRAL = 'nearplace:onboarding:referral:v1';
 const KEY_TERMS = 'nearplace:onboarding:termsAccepted:v1';
+const KEY_NAMES = 'nearplace:onboarding:names:v1';
+
+const CATEGORY_CHOICES: Array<{ id: string; label: string }> = [
+  { id: 'restaurant', label: 'Restaurant' },
+  { id: 'bar', label: 'Bar' },
+  { id: 'supermarket', label: 'Super‑marché' },
+  { id: 'boutique', label: 'Boutique' },
+  { id: 'magasin', label: 'Magasin' },
+  { id: 'pressing', label: 'Pressing' },
+  { id: 'school', label: 'École' },
+  { id: 'other', label: 'Autres' },
+];
 
 type Step = 1 | 2 | 3 | 4;
 type AccountType = 'user' | 'establishment';
@@ -21,6 +33,7 @@ export default function PostRegisterFlow() {
   const router = useRouter();
   const qc = useQueryClient();
   const tint = usePrimaryTints();
+  const params = useLocalSearchParams<{ type?: string }>();
 
   const [step, setStep] = useState<Step>(1);
   const [type, setType] = useState<AccountType | null>(null);
@@ -28,16 +41,45 @@ export default function PostRegisterFlow() {
   const [err, setErr] = useState<string | null>(null);
 
   // establishment fields
+  const [ownerFirstName, setOwnerFirstName] = useState('');
+  const [ownerLastName, setOwnerLastName] = useState('');
   const [bizName, setBizName] = useState('');
-  const [bizCat, setBizCat] = useState('restaurant');
+  const [bizCatPreset, setBizCatPreset] = useState('restaurant');
+  const [bizCatOther, setBizCatOther] = useState('');
   const [bizPhone, setBizPhone] = useState('');
   const [bizAddress, setBizAddress] = useState('');
   const [bizCommune, setBizCommune] = useState('');
+  const [editOwnerNames, setEditOwnerNames] = useState(true);
 
   // user referral
   const [referral, setReferral] = useState<string>('');
 
   const [termsAccepted, setTermsAccepted] = useState(false);
+
+  useEffect(() => {
+    // Allow re-opening this flow from inside the app (e.g. "complete establishment later")
+    if (params.type === 'establishment') {
+      setType('establishment');
+      setStep(2);
+    }
+  }, [params.type]);
+
+  useEffect(() => {
+    // Prefill names captured during register (avoid re-asking).
+    (async () => {
+      const raw = await AsyncStorage.getItem(KEY_NAMES).catch(() => null);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as any;
+      const fn = String(parsed?.firstName || '').trim();
+      const ln = String(parsed?.lastName || '').trim();
+      if (fn && !ownerFirstName) setOwnerFirstName(fn);
+      if (ln && !ownerLastName) setOwnerLastName(ln);
+      if ((fn || ownerFirstName).trim().length >= 2 && (ln || ownerLastName).trim().length >= 2) {
+        setEditOwnerNames(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const title = useMemo(() => {
     if (step === 1) return 'Votre profil';
@@ -64,14 +106,21 @@ export default function PostRegisterFlow() {
 
     if (step === 2) {
       if (type === 'establishment') {
+        const first = ownerFirstName.trim();
+        const last = ownerLastName.trim();
         const name = bizName.trim();
+        const category = (bizCatPreset === 'other' ? bizCatOther.trim() : bizCatPreset.trim()) || 'other';
+        if (first.length < 2) return setErr('Prénom requis.');
+        if (last.length < 2) return setErr('Nom requis.');
         if (name.length < 2) return setErr("Nom d'établissement requis.");
         setLoading(true);
         try {
           // Minimal required by backend: name/category/lat/lng
           await upsertProProfile({
+            ownerFirstName: first,
+            ownerLastName: last,
             name,
-            category: bizCat.trim() || 'restaurant',
+            category,
             phone: bizPhone.trim() || undefined,
             address: bizAddress.trim() || undefined,
             lat: DEFAULT_LOCATION.lat,
@@ -156,12 +205,59 @@ export default function PostRegisterFlow() {
 
             {step === 2 && type === 'establishment' && (
               <View style={{ gap: 12 }}>
+                {!editOwnerNames && ownerFirstName.trim().length >= 2 && ownerLastName.trim().length >= 2 ? (
+                  <TouchableOpacity activeOpacity={0.9} onPress={() => setEditOwnerNames(true)} style={[styles.choice, styles.choiceActive]}>
+                    <Text style={styles.choiceIcon}>👤</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.choiceTitle}>{ownerFirstName} {ownerLastName}</Text>
+                      <Text style={styles.choiceSub}>Appuie pour modifier</Text>
+                    </View>
+                  </TouchableOpacity>
+                ) : (
+                  <>
+                    <LinearGradient colors={[tint.fieldA, tint.fieldB]} style={styles.pill}>
+                      <TextInput
+                        value={ownerFirstName}
+                        onChangeText={setOwnerFirstName}
+                        placeholder="Prénom"
+                        placeholderTextColor="rgba(11,18,32,0.45)"
+                        style={styles.pillInput}
+                      />
+                    </LinearGradient>
+                    <LinearGradient colors={[tint.fieldA, tint.fieldB]} style={styles.pill}>
+                      <TextInput
+                        value={ownerLastName}
+                        onChangeText={setOwnerLastName}
+                        placeholder="Nom"
+                        placeholderTextColor="rgba(11,18,32,0.45)"
+                        style={styles.pillInput}
+                      />
+                    </LinearGradient>
+                  </>
+                )}
                 <LinearGradient colors={[tint.fieldA, tint.fieldB]} style={styles.pill}>
                   <TextInput value={bizName} onChangeText={setBizName} placeholder="Nom de l’établissement" placeholderTextColor="rgba(11,18,32,0.45)" style={styles.pillInput} />
                 </LinearGradient>
-                <LinearGradient colors={[tint.fieldA, tint.fieldB]} style={styles.pill}>
-                  <TextInput value={bizCat} onChangeText={setBizCat} placeholder="Catégorie (ex: restaurant)" placeholderTextColor="rgba(11,18,32,0.45)" style={styles.pillInput} />
-                </LinearGradient>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginTop: 2 }}>
+                  {CATEGORY_CHOICES.map((c) => {
+                    const active = bizCatPreset === c.id;
+                    return (
+                      <TouchableOpacity
+                        key={c.id}
+                        activeOpacity={0.9}
+                        onPress={() => setBizCatPreset(c.id)}
+                        style={[styles.chip, active && styles.chipActive]}
+                      >
+                        <Text style={[styles.chipText, active && styles.chipTextActive]}>{c.label}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                {bizCatPreset === 'other' && (
+                  <LinearGradient colors={[tint.fieldA, tint.fieldB]} style={styles.pill}>
+                    <TextInput value={bizCatOther} onChangeText={setBizCatOther} placeholder="Préciser la catégorie" placeholderTextColor="rgba(11,18,32,0.45)" style={styles.pillInput} />
+                  </LinearGradient>
+                )}
                 <LinearGradient colors={[tint.fieldA, tint.fieldB]} style={styles.pill}>
                   <TextInput value={bizPhone} onChangeText={setBizPhone} placeholder="Téléphone (optionnel)" placeholderTextColor="rgba(11,18,32,0.45)" style={styles.pillInput} keyboardType="phone-pad" />
                 </LinearGradient>
@@ -171,7 +267,28 @@ export default function PostRegisterFlow() {
                 <LinearGradient colors={[tint.fieldA, tint.fieldB]} style={styles.pill}>
                   <TextInput value={bizCommune} onChangeText={setBizCommune} placeholder="Commune/Ville (optionnel)" placeholderTextColor="rgba(11,18,32,0.45)" style={styles.pillInput} />
                 </LinearGradient>
-                {!!bizCommune && <Text style={styles.helper}>Astuce: tu pourras compléter/ajuster plus tard dans le profil.</Text>}
+                <Text style={styles.helper}>Tu peux compléter les infos plus tard si tu veux.</Text>
+
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  disabled={loading}
+                  onPress={async () => {
+                    setErr(null);
+                    setLoading(true);
+                    try {
+                      await setRoleIntent('establishment');
+                      await qc.invalidateQueries({ queryKey: ['auth-me'] }).catch(() => {});
+                      setStep(3);
+                    } catch (e: any) {
+                      setErr(String(e?.response?.data?.message || e?.message || 'Erreur'));
+                    } finally {
+                      setLoading(false);
+                    }
+                  }}
+                  style={[styles.ghostBtn, loading && { opacity: 0.7 }]}
+                >
+                  <Text style={styles.ghostBtnText}>Plus tard (compléter après)</Text>
+                </TouchableOpacity>
               </View>
             )}
 
@@ -248,6 +365,25 @@ const styles = StyleSheet.create({
   pill: { borderRadius: 999, paddingHorizontal: 14, paddingVertical: 12 },
   pillInput: { color: '#0b1220', fontSize: 14, fontWeight: '400' },
   helper: { color: 'rgba(11,18,32,0.55)', fontWeight: '400', fontSize: 12 },
+
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: 'rgba(11,18,32,0.04)',
+  },
+  chipActive: { backgroundColor: 'rgba(37,99,235,0.10)' },
+  chipText: { color: 'rgba(11,18,32,0.70)', fontWeight: '500', fontSize: 12 },
+  chipTextActive: { color: '#0b1220', fontWeight: '600' },
+
+  ghostBtn: {
+    marginTop: 2,
+    paddingVertical: 12,
+    borderRadius: 999,
+    alignItems: 'center',
+    backgroundColor: 'rgba(11,18,32,0.04)',
+  },
+  ghostBtnText: { color: 'rgba(11,18,32,0.70)', fontWeight: '500', fontSize: 13 },
 
   termsText: { color: 'rgba(11,18,32,0.70)', fontWeight: '400', fontSize: 13, lineHeight: 18, textAlign: 'center' },
 

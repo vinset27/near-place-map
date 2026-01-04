@@ -39,6 +39,11 @@ export async function resendEmailVerification(): Promise<{ ok: boolean; alreadyV
   return res.data as any;
 }
 
+export async function verifyEmailCode(code: string): Promise<{ ok: boolean; alreadyVerified?: boolean; user?: AuthUser }> {
+  const res = await api.post('/api/auth/verify-email-code', { code });
+  return res.data as any;
+}
+
 export async function requestPasswordReset(email: string): Promise<{ ok: boolean }> {
   const res = await api.post('/api/auth/request-password-reset', { email });
   return res.data as any;
@@ -51,6 +56,16 @@ export async function resetPassword(params: { email: string; code: string; newPa
 
 export async function changePassword(params: { currentPassword: string; newPassword: string }): Promise<{ ok: boolean }> {
   const res = await api.post('/api/auth/change-password', params);
+  return res.data as any;
+}
+
+export async function requestPasswordChangeCode(): Promise<{ ok: boolean }> {
+  const res = await api.post('/api/auth/request-password-change-code', {});
+  return res.data as any;
+}
+
+export async function confirmPasswordChange(params: { code: string; newPassword: string }): Promise<{ ok: boolean }> {
+  const res = await api.post('/api/auth/confirm-password-change', params);
   return res.data as any;
 }
 

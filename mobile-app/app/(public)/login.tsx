@@ -27,8 +27,16 @@ export default function LoginScreen() {
     try {
       const user = await authLogin({ username: username.trim(), password });
       await qc.invalidateQueries({ queryKey: ['auth-me'] });
+      if ((user as any)?.emailVerified === false) {
+        router.replace('/verify-email');
+        return;
+      }
       // Route depending on role (avoid confusing users that are not "establishment").
       const role = String((user as any)?.role || 'user');
+      if (role === 'admin') {
+        router.replace('/admin');
+        return;
+      }
       if (role === 'establishment') router.replace('/business');
       else router.replace('/map');
     } catch (e: any) {

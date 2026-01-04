@@ -7,6 +7,7 @@ function adminHeaders(token?: string) {
 
 export type PendingModeration = {
   pending: {
+    establishments?: any[];
     events: any[];
     userEvents: any[];
   };
@@ -34,6 +35,46 @@ export async function approveUserEvent(id: string, token?: string): Promise<void
 
 export async function rejectUserEvent(id: string, token?: string): Promise<void> {
   await api.post(`/api/admin/user-events/${encodeURIComponent(id)}/reject`, null, { headers: adminHeaders(token) });
+}
+
+export async function approveEstablishment(id: string, token?: string): Promise<void> {
+  await api.post(`/api/admin/establishments/${encodeURIComponent(id)}/approve`, null, { headers: adminHeaders(token) });
+}
+
+export async function rejectEstablishment(id: string, token?: string): Promise<void> {
+  await api.post(`/api/admin/establishments/${encodeURIComponent(id)}/reject`, null, { headers: adminHeaders(token) });
+}
+
+export async function setUserRole(login: string, role: 'user' | 'establishment' | 'admin', token?: string): Promise<any> {
+  const res = await api.post(
+    `/api/admin/users/set-role`,
+    { login: String(login || '').trim(), role },
+    { headers: adminHeaders(token) },
+  );
+  return (res.data as any)?.user;
+}
+
+export async function adminCreateUser(
+  params: { email: string; password: string; role?: 'user' | 'establishment' | 'admin'; emailVerified?: boolean },
+  token?: string,
+): Promise<any> {
+  const res = await api.post(
+    `/api/admin/users`,
+    {
+      email: String(params.email || '').trim(),
+      password: String(params.password || ''),
+      role: params.role || 'user',
+      emailVerified: params.emailVerified ?? false,
+    },
+    { headers: adminHeaders(token) },
+  );
+  return (res.data as any)?.user;
+}
+
+export async function resendTestEmail(to: string, token?: string): Promise<{ ok: boolean; id?: string | null }> {
+  const email = String(to || '').trim().toLowerCase();
+  const res = await api.post('/api/admin/resend/test', { to: email }, { headers: adminHeaders(token) });
+  return res.data as any;
 }
 
 

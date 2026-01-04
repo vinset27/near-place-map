@@ -121,9 +121,11 @@ export async function ensureAppTables() {
       owner_user_id varchar,
       provider text,
       provider_place_id text,
-      published boolean not null default true
+      published boolean not null default false
     );
   `);
+  // Ensure moderation default even if table existed before.
+  await pool.query(`alter table establishments alter column published set default false;`);
 
   // If table already existed, add new columns safely.
   await pool.query(`alter table establishments add column if not exists provider text;`);
@@ -131,6 +133,8 @@ export async function ensureAppTables() {
   await pool.query(`alter table establishments add column if not exists source_application_id uuid;`);
   await pool.query(`alter table establishments add column if not exists photos text[];`);
   await pool.query(`alter table establishments add column if not exists owner_user_id varchar;`);
+  await pool.query(`create index if not exists establishments_published_lat_lng_idx on establishments (published, lat, lng);`);
+  await pool.query(`create index if not exists establishments_created_at_idx on establishments (created_at desc);`);
 
   // Avoid duplicates for imported providers (google place_id).
   // Use a real UNIQUE constraint so `ON CONFLICT (provider, provider_place_id)` always matches.
@@ -184,6 +188,7 @@ export async function ensureAppTables() {
   `);
   // Ensure moderation default even if table existed before.
   await pool.query(`alter table events alter column published set default false;`);
+  await pool.query(`create index if not exists events_published_starts_at_idx on events (published, starts_at);`);
 
   await pool.query(`create index if not exists events_starts_at_idx on events (starts_at);`);
   await pool.query(`create index if not exists events_establishment_id_idx on events (establishment_id);`);
@@ -207,6 +212,7 @@ export async function ensureAppTables() {
   `);
   // Ensure moderation default even if table existed before.
   await pool.query(`alter table user_events alter column published set default false;`);
+  await pool.query(`create index if not exists user_events_published_starts_at_idx on user_events (published, starts_at);`);
   await pool.query(`create index if not exists user_events_starts_at_idx on user_events (starts_at);`);
   await pool.query(`create index if not exists user_events_user_id_idx on user_events (user_id);`);
   await pool.query(`create index if not exists user_events_lat_lng_idx on user_events (lat, lng);`);
@@ -243,12 +249,18 @@ export async function ensureAppTables() {
       user_id varchar not null,
       token text not null,
       platform text,
+      lat double precision,
+      lng double precision,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now(),
       unique (user_id, token)
     );
   `);
+  await pool.query(`alter table push_tokens add column if not exists lat double precision;`);
+  await pool.query(`alter table push_tokens add column if not exists lng double precision;`);
   await pool.query(`create index if not exists push_tokens_user_id_idx on push_tokens (user_id);`);
+  await pool.query(`create index if not exists push_tokens_lat_lng_idx on push_tokens (lat, lng);`);
+  await pool.query(`create index if not exists push_tokens_updated_at_idx on push_tokens (updated_at);`);
 
   // Navigation signals: when a user starts an itinerary to an establishment.
   await pool.query(`

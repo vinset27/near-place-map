@@ -118,6 +118,9 @@ if (__DEV__) {
       // retry once against the local dev server inferred from Expo host.
       const cfg = error.config as any;
       const url = String(cfg?.url || '');
+      const silent =
+        cfg?.__npSilent === true ||
+        String(cfg?.headers?.['X-NP-SILENT'] || cfg?.headers?.['x-np-silent'] || '').trim() === '1';
 
       // One-time retry for GET timeouts (cold start / waking up dyno)
       if (cfg && !cfg.__npTimeoutRetried && error?.code === 'ECONNABORTED') {
@@ -180,15 +183,17 @@ if (__DEV__) {
       const suppressLogoutError = isLogout && (error?.code === 'ECONNABORTED' || status === 502 || status === 503 || status === 504);
 
       if (!isAuthMe401 && !isProfile401 && !suppressLogoutError) {
-        console.error(
-          `[API] ✗ ${error.config?.method?.toUpperCase?.() || 'GET'} ${error.config?.baseURL || ''}${error.config?.url || ''}`,
-          {
-            message: error?.message,
-            status: error.response?.status,
-            data: error.response?.data,
-            code: error.code,
-          }
-        );
+        if (!silent) {
+          console.error(
+            `[API] ✗ ${error.config?.method?.toUpperCase?.() || 'GET'} ${error.config?.baseURL || ''}${error.config?.url || ''}`,
+            {
+              message: error?.message,
+              status: error.response?.status,
+              data: error.response?.data,
+              code: error.code,
+            }
+          );
+        }
       }
 
       if (isHtml) {

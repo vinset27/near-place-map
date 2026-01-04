@@ -177,6 +177,52 @@ function haversineMeters(a: { lat: number; lng: number }, b: { lat: number; lng:
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+async function pushNotifyNearby(params: {
+  center: { lat: number; lng: number };
+  radiusKm: number;
+  title: string;
+  body: string;
+  data?: Record<string, any>;
+  excludeUserId?: string | null;
+}) {
+  if (!pool) return;
+  const { center, radiusKm, title, body, data, excludeUserId } = params;
+  const lat = Number(center.lat);
+  const lng = Number(center.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  const rKm = Math.min(50, Math.max(1, Number(radiusKm) || 10));
+  const dLat = rKm / 111.32;
+  const dLng = rKm / (111.32 * Math.max(0.2, Math.cos((lat * Math.PI) / 180)));
+
+  // Only consider relatively recent locations to avoid spamming stale tokens.
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const rows = await pool
+    .query(
+      `
+        select user_id, token, lat, lng
+        from push_tokens
+        where lat is not null and lng is not null
+          and lat >= $1 and lat <= $2
+          and lng >= $3 and lng <= $4
+          and updated_at >= $5
+      `,
+      [lat - dLat, lat + dLat, lng - dLng, lng + dLng, since],
+    )
+    .catch(() => null as any);
+  const candidates = rows?.rows || [];
+  const radiusM = rKm * 1000;
+  const tokens = candidates
+    .filter((r: any) => (excludeUserId ? String(r.user_id || "") !== String(excludeUserId) : true))
+    .filter((r: any) => Number.isFinite(Number(r.lat)) && Number.isFinite(Number(r.lng)))
+    .filter((r: any) => haversineMeters({ lat, lng }, { lat: Number(r.lat), lng: Number(r.lng) }) <= radiusM)
+    .map((r: any) => String(r.token || ""))
+    .filter(Boolean)
+    .slice(0, 900); // keep bounded
+
+  if (!tokens.length) return;
+  await sendExpoPush(tokens, { title, body, data }).catch(() => {});
+}
+
 function inferCommuneFromAddress(address: string | null | undefined): string | null {
   const a = String(address || "").toLowerCase();
   if (!a) return null;
@@ -293,6 +339,8 @@ export async function registerRoutes(
         .object({
           token: z.string().min(10).max(300),
           platform: z.string().max(20).optional(),
+          lat: z.number().optional(),
+          lng: z.number().optional(),
         })
         .safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
@@ -308,6 +356,18 @@ export async function registerRoutes(
         `,
         [userId, token, parsed.data.platform ? String(parsed.data.platform).trim() : null],
       );
+
+      // Optional: update last known device location for "nearby" notifications (best-effort).
+      const lat = parsed.data.lat;
+      const lng = parsed.data.lng;
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        await pool
+          .query(
+            `update push_tokens set lat = $1, lng = $2, updated_at = now() where user_id = $3 and token = $4`,
+            [Number(lat), Number(lng), userId, token],
+          )
+          .catch(() => {});
+      }
       return res.json({ ok: true });
     }),
   );
@@ -889,7 +949,8 @@ export async function registerRoutes(
         ownerUserId: userId,
         provider: "manual",
         providerPlaceId: null,
-        published: true,
+        // Moderation: admin must approve before public listing
+        published: false,
       })
       .returning();
     // New place => invalidate nearby caches quickly.
@@ -919,6 +980,17 @@ export async function registerRoutes(
     const rows = await db.select().from(establishments).where(eq(establishments.id, id as any)).limit(1);
     const row = rows[0];
     if (!row) return res.status(404).json({ message: "Not found" });
+    // Do not leak non-published establishments publicly. Owner or admin can still access.
+    if ((row as any).published === false) {
+      const sessionUserId = req.session?.userId;
+      const isOwner = sessionUserId && String((row as any).ownerUserId || "") === String(sessionUserId);
+      let isAdmin = false;
+      if (db && sessionUserId) {
+        const uRows = await db.select().from(users).where(eq(users.id, String(sessionUserId))).limit(1);
+        isAdmin = String((uRows[0] as any)?.role || "") === "admin" && !(uRows[0] as any)?.deletedAt;
+      }
+      if (!isOwner && !isAdmin) return res.status(404).json({ message: "Not found" });
+    }
     return res.json({ establishment: row });
   }));
 
@@ -971,10 +1043,16 @@ export async function registerRoutes(
     if (!u || u.deletedAt) return res.status(401).json({ message: "Unauthorized" });
     if (u.emailVerified) return res.json({ ok: true, alreadyVerified: true, user: safeUser(u) });
 
-    const sentAt = u.emailVerificationSentAt ? Date.parse(String(u.emailVerificationSentAt)) : 0;
-    if (!u.emailVerificationCode || !sentAt) return res.status(400).json({ message: "Code invalide" });
-    if (Date.now() - sentAt > 15 * 60_000) return res.status(400).json({ message: "Code expiré" });
-    if (String(u.emailVerificationCode).replace(/\D/g, "").slice(0, 6) !== code) return res.status(400).json({ message: "Code invalide" });
+    const stored = String(u.emailVerificationCode || "").replace(/\D/g, "").slice(0, 6);
+    let sentAtMs =
+      u.emailVerificationSentAt instanceof Date
+        ? u.emailVerificationSentAt.getTime()
+        : (u.emailVerificationSentAt ? Date.parse(String(u.emailVerificationSentAt)) : 0);
+    if (!stored) return res.status(400).json({ message: "Aucun code actif. Appuie sur “Renvoyer le code”." });
+    // Be tolerant if timestamp parsing fails (some drivers can return non-parseable strings).
+    if (!Number.isFinite(sentAtMs) || sentAtMs <= 0) sentAtMs = Date.now();
+    if (Date.now() - sentAtMs > 15 * 60_000) return res.status(400).json({ message: "Code expiré. Appuie sur “Renvoyer le code”." });
+    if (stored !== code) return res.status(400).json({ message: "Code invalide (utilise le dernier code reçu)." });
 
     await db
       .update(users)
@@ -1728,6 +1806,19 @@ export async function registerRoutes(
       if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
       const limit = Math.min(500, Math.max(1, Number(req.query.limit || 200)));
 
+      const pendingEstablishments = await db
+        .select({
+          est: establishments,
+          owner: users,
+          prof: establishmentProfiles,
+        })
+        .from(establishments)
+        .leftJoin(users, eq(establishments.ownerUserId, users.id))
+        .leftJoin(establishmentProfiles, eq(establishments.ownerUserId, establishmentProfiles.userId))
+        .where(eq(establishments.published, false))
+        .orderBy(desc(establishments.createdAt))
+        .limit(limit);
+
       const pendingEvents = await db
         .select({
           ev: events,
@@ -1756,6 +1847,13 @@ export async function registerRoutes(
 
       return res.json({
         pending: {
+          establishments: pendingEstablishments.map((r: any) => ({
+            ...r.est,
+            owner: {
+              userId: String(r.owner?.id || r.est.ownerUserId || ""),
+              name: String(r.prof?.name || r.owner?.username || "Propriétaire"),
+            },
+          })),
           events: pendingEvents.map((r: any) => ({
             ...r.ev,
             establishment: r.est || null,
@@ -1771,6 +1869,146 @@ export async function registerRoutes(
           })),
         },
       });
+    }),
+  );
+
+  // Admin: approve/reject establishments (manual submissions)
+  app.post(
+    "/api/admin/establishments/:id/approve",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+      if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+      const id = String(req.params.id || "").trim();
+      if (!isUuidLike(id)) return res.status(400).json({ message: "Invalid id" });
+      await db.update(establishments).set({ published: true }).where(eq(establishments.id, id as any));
+      establishmentsCache.clear();
+      return res.json({ ok: true });
+    }),
+  );
+
+  app.post(
+    "/api/admin/establishments/:id/reject",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+      if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+      const id = String(req.params.id || "").trim();
+      if (!isUuidLike(id)) return res.status(400).json({ message: "Invalid id" });
+      await db.delete(establishments).where(eq(establishments.id, id as any));
+      establishmentsCache.clear();
+      return res.json({ ok: true });
+    }),
+  );
+
+  // Admin: hard delete any content (even if already published)
+  app.delete(
+    "/api/admin/establishments/:id",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+      if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+      const id = String(req.params.id || "").trim();
+      if (!isUuidLike(id)) return res.status(400).json({ message: "Invalid id" });
+      await db.delete(establishments).where(eq(establishments.id, id as any));
+      establishmentsCache.clear();
+      return res.json({ ok: true });
+    }),
+  );
+
+  app.delete(
+    "/api/admin/events/:id",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+      if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+      const id = String(req.params.id || "").trim();
+      if (!isUuidLike(id)) return res.status(400).json({ message: "Invalid id" });
+      await db.delete(events).where(eq(events.id, id as any));
+      return res.json({ ok: true });
+    }),
+  );
+
+  app.delete(
+    "/api/admin/user-events/:id",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+      if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+      const id = String(req.params.id || "").trim();
+      if (!isUuidLike(id)) return res.status(400).json({ message: "Invalid id" });
+      await db.delete(userEvents).where(eq(userEvents.id, id as any));
+      return res.json({ ok: true });
+    }),
+  );
+
+  // Admin: create users + set roles (full powers)
+  app.post(
+    "/api/admin/users",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+      if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+      const parsed = z
+        .object({
+          email: z.string().min(3).max(200),
+          password: z.string().min(6).max(200),
+          role: z.enum(["user", "establishment", "admin"]).default("user"),
+          emailVerified: z.boolean().optional(),
+        })
+        .safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+      const email = String(parsed.data.email || "").trim().toLowerCase();
+      if (!looksLikeEmail(email)) return res.status(400).json({ message: "Email invalide" });
+
+      const existingRows = await db
+        .select()
+        .from(users)
+        .where(or(sql`lower(trim(${users.username})) = ${email}`, sql`lower(trim(${users.email})) = ${email}`))
+        .limit(1);
+      if (existingRows[0]) return res.status(409).json({ message: "Un compte existe déjà avec cet email." });
+
+      const hashed = await hashPassword(parsed.data.password);
+      const rows = await db
+        .insert(users)
+        .values({
+          username: email,
+          email,
+          password: hashed,
+          role: parsed.data.role,
+          emailVerified: parsed.data.emailVerified ?? false,
+          profileCompleted: parsed.data.role === "establishment" ? false : true,
+        } as any)
+        .returning();
+      return res.status(201).json({ user: safeUser(rows[0]) });
+    }),
+  );
+
+  app.post(
+    "/api/admin/users/set-role",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+      if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+      const parsed = z
+        .object({
+          login: z.string().min(2).max(200),
+          role: z.enum(["user", "establishment", "admin"]),
+        })
+        .safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+      const login = String(parsed.data.login || "").trim().toLowerCase();
+      const role = parsed.data.role;
+      const rows = await db
+        .select()
+        .from(users)
+        .where(or(sql`lower(trim(${users.email})) = ${login}`, sql`lower(trim(${users.username})) = ${login}`))
+        .limit(1);
+      const u = rows[0] as any;
+      if (!u) return res.status(404).json({ message: "Utilisateur introuvable" });
+      if (u.deletedAt) return res.status(404).json({ message: "Utilisateur introuvable" });
+      await db
+        .update(users)
+        .set({
+          role,
+          profileCompleted: role === "establishment" ? false : true,
+        } as any)
+        .where(eq(users.id, u.id));
+      const updated = await storage.getUser(String(u.id));
+      return res.json({ ok: true, user: safeUser(updated) });
     }),
   );
 
@@ -1809,6 +2047,20 @@ export async function registerRoutes(
               });
             }
           }
+
+          // Also notify nearby users (within 10km of the establishment).
+          const lat = Number(est?.lat);
+          const lng = Number(est?.lng);
+          if (Number.isFinite(lat) && Number.isFinite(lng)) {
+            await pushNotifyNearby({
+              center: { lat, lng },
+              radiusKm: 10,
+              title: "Évènement près de vous",
+              body: `${String(est?.name || "Un établissement")} • ${String(ev?.title || "Nouvel évènement")}`,
+              data: { type: "event_nearby", eventId: id, establishmentId: estId },
+              excludeUserId: String(ev?.userId || ""),
+            });
+          }
         } catch (e: any) {
           console.warn("[push] notify favorites failed", String(e?.message || e));
         }
@@ -1826,6 +2078,27 @@ export async function registerRoutes(
       const id = String(req.params.id || "").trim();
       if (!isUuidLike(id)) return res.status(400).json({ message: "Invalid id" });
       await db.update(userEvents).set({ published: true }).where(eq(userEvents.id, id as any));
+
+      // Notify nearby users (within 10km of the meetup location).
+      try {
+        const rows = await db.select().from(userEvents).where(eq(userEvents.id, id as any)).limit(1);
+        const ue = rows[0] as any;
+        const lat = Number(ue?.lat);
+        const lng = Number(ue?.lng);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          await pushNotifyNearby({
+            center: { lat, lng },
+            radiusKm: 10,
+            title: "Soirée près de vous",
+            body: String(ue?.title || "Nouvelle soirée"),
+            data: { type: "user_event_nearby", userEventId: id },
+            excludeUserId: String(ue?.userId || ""),
+          });
+        }
+      } catch {
+        // ignore
+      }
+
       return res.json({ ok: true });
     }),
   );

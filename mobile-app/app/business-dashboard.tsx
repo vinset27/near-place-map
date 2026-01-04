@@ -1,11 +1,11 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { authLogout, authMe, resendEmailVerification } from '../services/auth';
+import { authLogout, authMe } from '../services/auth';
 import { PlaceImage } from '../components/UI/PlaceImage';
 import { useCurrentLocation } from '../stores/useLocationStore';
 import { useLocationStore } from '../stores/useLocationStore';
@@ -32,6 +32,13 @@ export default function BusinessDashboardScreen() {
   const isEstablishment = !!me && (me as any)?.role === 'establishment' && !!(me as any)?.profileCompleted;
   const isBackendError = !!meError && (meError as any)?.response?.status !== 401;
   const isEmailVerified = !!me && (me as any)?.emailVerified !== false;
+
+  // Centralize verification UI on /verify-email only.
+  useEffect(() => {
+    if (isAuthed && !isEmailVerified) {
+      router.replace('/verify-email');
+    }
+  }, [isAuthed, isEmailVerified, router]);
 
   const canQuery = !hasPermission || !!rawUserLocation;
 
@@ -125,20 +132,8 @@ export default function BusinessDashboardScreen() {
 
           {isAuthed && !isEmailVerified && (
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Confirmer votre email</Text>
-              <Text style={styles.cardText}>Avant d’accéder au dashboard Pro, vous devez confirmer votre email.</Text>
-              <TouchableOpacity
-                style={styles.secondarySmall}
-                onPress={async () => {
-                  try {
-                    await resendEmailVerification();
-                  } finally {
-                    await qc.invalidateQueries({ queryKey: ['auth-me'] });
-                  }
-                }}
-              >
-                <Text style={styles.secondarySmallText}>Renvoyer l’email</Text>
-              </TouchableOpacity>
+              <Text style={styles.cardTitle}>Email non vérifié</Text>
+              <Text style={styles.cardText}>Redirection vers la page de vérification…</Text>
             </View>
           )}
 
@@ -206,22 +201,8 @@ export default function BusinessDashboardScreen() {
             <Text style={styles.sectionTitle}>Établissement</Text>
             {isAuthed && !isEmailVerified && (
               <View style={styles.card}>
-                <Text style={styles.cardTitle}>Confirmer votre email</Text>
-                <Text style={styles.cardText}>
-                  Pour activer l’espace Pro, confirmez votre email. Regardez votre boîte mail puis cliquez sur le lien.
-                </Text>
-                <TouchableOpacity
-                  style={styles.secondarySmall}
-                  onPress={async () => {
-                    try {
-                      await resendEmailVerification();
-                    } finally {
-                      await qc.invalidateQueries({ queryKey: ['auth-me'] });
-                    }
-                  }}
-                >
-                  <Text style={styles.secondarySmallText}>Renvoyer l’email</Text>
-                </TouchableOpacity>
+                <Text style={styles.cardTitle}>Email non vérifié</Text>
+                <Text style={styles.cardText}>Redirection vers la page de vérification…</Text>
               </View>
             )}
             {isAuthed && !isEstablishment && (

@@ -12,3 +12,4 @@ export async function getFavorites(): Promise<{ favorites: Array<{ establishment
 }
 
 
+

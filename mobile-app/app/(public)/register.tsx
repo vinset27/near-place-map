@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQueryClient } from '@tanstack/react-query';
 import { authRegister } from '../../services/auth';
 import { useAppTheme } from '../../services/settingsTheme';
@@ -10,6 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { PublicScaffold, usePrimaryTints } from '../../components/UI/PublicScaffold';
 
 const HERO_IMAGE = require('../../assets/119589243_10178365.jpg'); // TODO: replace with your custom illustration
+const KEY_NAMES = 'nearplace:onboarding:names:v1';
 
 function looksLikeEmail(s: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s || '').trim());
@@ -58,9 +60,19 @@ export default function RegisterScreen() {
     }
     setLoading(true);
     try {
-      await authRegister({ username: email, password });
+      // Persist names for post-register establishment flow (avoid re-asking if already provided).
+      const fn = String(firstName || '').trim();
+      const ln = String(lastName || '').trim();
+      if (fn || ln) {
+        await AsyncStorage.setItem(KEY_NAMES, JSON.stringify({ firstName: fn, lastName: ln })).catch(() => {});
+      }
+      const user = await authRegister({ username: email, password });
       await qc.invalidateQueries({ queryKey: ['auth-me'] });
-      // Go through onboarding steps after registration (role, optional establishment info, terms, welcome).
+      // Force email confirmation step (code) before continuing onboarding.
+      if ((user as any)?.emailVerified === false) {
+        router.replace('/verify-email');
+        return;
+      }
       router.replace('/post-register');
     } catch (e: any) {
       setError(String(e?.response?.data?.message || e?.message || 'Erreur'));
