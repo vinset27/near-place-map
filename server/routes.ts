@@ -136,12 +136,28 @@ const requireAdmin = asyncHandler(async (req: any, res: any, next: any) => {
 
 function safeUser(u: any) {
   if (!u) return null;
-  const { password, emailVerificationToken, passwordResetCode, passwordResetSentAt, deletedAt, ...rest } = u;
+  const {
+    password,
+    emailVerificationToken,
+    emailVerificationCode,
+    emailVerificationSentAt,
+    passwordResetCode,
+    passwordResetSentAt,
+    passwordChangeCode,
+    passwordChangeSentAt,
+    deletedAt,
+    ...rest
+  } = u;
   return rest;
 }
 
 function makeToken(bytes = 24): string {
   return crypto.randomBytes(bytes).toString("hex");
+}
+
+function make6DigitCode(): string {
+  // 000000-999999, padded
+  return String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
 }
 
 function looksLikeEmail(s: string): boolean {
@@ -927,7 +943,7 @@ export async function registerRoutes(
 
     await db
       .update(users)
-      .set({ emailVerified: true, emailVerificationToken: null, emailVerificationSentAt: null })
+      .set({ emailVerified: true, emailVerificationToken: null, emailVerificationCode: null, emailVerificationSentAt: null })
       .where(eq(users.id, u.id));
 
     // Simple confirmation page (works in mobile browser too)
@@ -939,6 +955,34 @@ export async function registerRoutes(
         <p>Vous pouvez revenir dans l’application et continuer sur l’espace Pro.</p>
       </body></html>
     `);
+  }));
+
+  // Email verification via code (preferred for mobile)
+  app.post("/api/auth/verify-email-code", requireAuth, asyncHandler(async (req, res) => {
+    if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    const userId = req.session.userId!;
+    const parsed = z.object({ code: z.string().min(4).max(12) }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    const code = String(parsed.data.code).trim();
+    if (!/^\d{6}$/.test(code)) return res.status(400).json({ message: "Code invalide" });
+
+    const rows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const u = rows[0] as any;
+    if (!u || u.deletedAt) return res.status(401).json({ message: "Unauthorized" });
+    if (u.emailVerified) return res.json({ ok: true, alreadyVerified: true, user: safeUser(u) });
+
+    const sentAt = u.emailVerificationSentAt ? Date.parse(String(u.emailVerificationSentAt)) : 0;
+    if (!u.emailVerificationCode || !sentAt) return res.status(400).json({ message: "Code invalide" });
+    if (Date.now() - sentAt > 15 * 60_000) return res.status(400).json({ message: "Code expiré" });
+    if (String(u.emailVerificationCode) !== code) return res.status(400).json({ message: "Code invalide" });
+
+    await db
+      .update(users)
+      .set({ emailVerified: true, emailVerificationCode: null, emailVerificationToken: null, emailVerificationSentAt: null })
+      .where(eq(users.id, userId));
+
+    const updated = await storage.getUser(userId);
+    return res.json({ ok: true, user: safeUser(updated) });
   }));
 
   app.post("/api/auth/register", async (req, res) => {
@@ -975,18 +1019,20 @@ export async function registerRoutes(
       email,
       password: await hashPassword(password),
     });
-    const token = makeToken(24);
+    const token = makeToken(24); // legacy link support (kept as fallback)
+    const code = make6DigitCode();
     await db
       .update(users)
-      .set({ emailVerified: false, emailVerificationToken: token, emailVerificationSentAt: new Date() })
+      .set({
+        emailVerified: false,
+        emailVerificationToken: token,
+        emailVerificationCode: code,
+        emailVerificationSentAt: new Date(),
+      })
       .where(eq(users.id, user.id));
 
     // Send verification email (best effort)
     try {
-      const baseUrl =
-        String(process.env.PUBLIC_API_URL || "").trim() ||
-        `${req.protocol}://${req.get("host")}`;
-      const link = `${baseUrl.replace(/\/+$/, "")}/api/auth/verify-email?token=${encodeURIComponent(token)}`;
       console.log(`[Resend] register: attempting to send verification email to=${email}`);
       await resendSendEmail({
         from: String(process.env.RESEND_FROM || "mapper-oshow@binary-security.com"),
@@ -995,9 +1041,9 @@ export async function registerRoutes(
         html: `
           <div style="font-family:system-ui; line-height:1.5">
             <h2>Bienvenue sur O'Show</h2>
-            <p>Confirme ton email pour activer l’espace Pro :</p>
-            <p><a href="${link}">Confirmer mon email</a></p>
-            <p style="color:#64748b; font-size:12px">Si le bouton ne marche pas, copie/colle: ${link}</p>
+            <p>Voici ton code de confirmation :</p>
+            <div style="font-size:28px; font-weight:700; letter-spacing:6px; padding:12px 0">${code}</div>
+            <p style="color:#64748b; font-size:12px">Ce code expire dans 15 minutes.</p>
           </div>
         `,
       });
@@ -1194,6 +1240,94 @@ export async function registerRoutes(
     return res.json({ ok: true });
   }));
 
+  // Change password via code (logged-in, 2-step)
+  app.post("/api/auth/request-password-change-code", requireAuth, asyncHandler(async (req, res) => {
+    if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    const userId = req.session.userId!;
+    const u = await storage.getUser(userId);
+    if (!u) return res.status(401).json({ message: "Unauthorized" });
+    if ((u as any).deletedAt) return res.status(403).json({ message: "Compte supprimé." });
+    const email = String((u as any).email || (u as any).username || "").trim().toLowerCase();
+    if (!email || !looksLikeEmail(email)) return res.status(400).json({ message: "Email invalide sur le compte." });
+
+    const rowsUser = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const dbUser = rowsUser[0] as any;
+    const last = dbUser?.passwordChangeSentAt ? Date.parse(String(dbUser.passwordChangeSentAt)) : 0;
+    if (last && Date.now() - last < 60_000) {
+      return res.status(429).json({ message: "Veuillez patienter avant de renvoyer le code." });
+    }
+
+    const code = make6DigitCode();
+    await db
+      .update(users)
+      .set({ passwordChangeCode: code, passwordChangeSentAt: new Date() })
+      .where(eq(users.id, userId));
+
+    try {
+      await resendSendEmail({
+        from: String(process.env.RESEND_FROM || "mapper-oshow@binary-security.com"),
+        to: email,
+        subject: "Code de changement de mot de passe — O'Show",
+        html: `
+          <div style="font-family:system-ui; line-height:1.5">
+            <h2>Changement de mot de passe</h2>
+            <p>Voici ton code :</p>
+            <div style="font-size:28px; font-weight:700; letter-spacing:6px; padding:12px 0">${code}</div>
+            <p style="color:#64748b; font-size:12px">Ce code expire dans 15 minutes.</p>
+          </div>
+        `,
+      });
+    } catch (e: any) {
+      console.warn("[Resend] password change code failed:", e?.message || e);
+      return res.status(503).json({ message: "Service email indisponible." });
+    }
+
+    return res.json({ ok: true });
+  }));
+
+  app.post("/api/auth/confirm-password-change", requireAuth, asyncHandler(async (req, res) => {
+    if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    const userId = req.session.userId!;
+    const parsed = z.object({ code: z.string().min(4).max(12), newPassword: z.string().min(6).max(200) }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    const code = String(parsed.data.code).trim();
+    if (!/^\d{6}$/.test(code)) return res.status(400).json({ message: "Code invalide" });
+
+    const rows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const u = rows[0] as any;
+    if (!u || u.deletedAt) return res.status(401).json({ message: "Unauthorized" });
+
+    const sentAt = u.passwordChangeSentAt ? Date.parse(String(u.passwordChangeSentAt)) : 0;
+    if (!u.passwordChangeCode || !sentAt) return res.status(400).json({ message: "Code invalide" });
+    if (Date.now() - sentAt > 15 * 60_000) return res.status(400).json({ message: "Code expiré" });
+    if (String(u.passwordChangeCode) !== code) return res.status(400).json({ message: "Code invalide" });
+
+    await db
+      .update(users)
+      .set({
+        password: await hashPassword(parsed.data.newPassword),
+        passwordChangeCode: null,
+        passwordChangeSentAt: null,
+      })
+      .where(eq(users.id, userId));
+
+    const email = String(u.email || u.username || "").trim().toLowerCase();
+    if (email && looksLikeEmail(email)) {
+      try {
+        await resendSendEmail({
+          from: String(process.env.RESEND_FROM || "mapper-oshow@binary-security.com"),
+          to: email,
+          subject: "Mot de passe modifié — O'Show",
+          html: `<div style="font-family:system-ui; line-height:1.5"><h2>Mot de passe modifié ✅</h2><p>Si ce n’est pas toi, contacte le support immédiatement.</p></div>`,
+        });
+      } catch (e: any) {
+        console.warn("[Resend] password change notice failed:", e?.message || e);
+      }
+    }
+
+    return res.json({ ok: true });
+  }));
+
   // Delete account (soft delete)
   app.post("/api/auth/delete-account", requireAuth, asyncHandler(async (req, res) => {
     if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
@@ -1244,15 +1378,17 @@ export async function registerRoutes(
     }
 
     const token = makeToken(24);
+    const code = make6DigitCode();
     await db
       .update(users)
-      .set({ emailVerified: false, emailVerificationToken: token, emailVerificationSentAt: new Date() })
+      .set({
+        emailVerified: false,
+        emailVerificationToken: token,
+        emailVerificationCode: code,
+        emailVerificationSentAt: new Date(),
+      })
       .where(eq(users.id, userId));
 
-    const baseUrl =
-      String(process.env.PUBLIC_API_URL || "").trim() ||
-      `${req.protocol}://${req.get("host")}`;
-    const link = `${baseUrl.replace(/\/+$/, "")}/api/auth/verify-email?token=${encodeURIComponent(token)}`;
     try {
       await resendSendEmail({
         from: String(process.env.RESEND_FROM || "mapper-oshow@binary-security.com"),
@@ -1261,9 +1397,9 @@ export async function registerRoutes(
         html: `
           <div style="font-family:system-ui; line-height:1.5">
             <h2>Confirmer l’email</h2>
-            <p>Clique ici :</p>
-            <p><a href="${link}">Confirmer mon email</a></p>
-            <p style="color:#64748b; font-size:12px">Si le bouton ne marche pas, copie/colle: ${link}</p>
+            <p>Voici ton code de confirmation :</p>
+            <div style="font-size:28px; font-weight:700; letter-spacing:6px; padding:12px 0">${code}</div>
+            <p style="color:#64748b; font-size:12px">Ce code expire dans 15 minutes.</p>
           </div>
         `,
       });

@@ -21,9 +21,12 @@ export async function ensureAppTables() {
       profile_completed boolean not null default false,
       email_verified boolean not null default false,
       email_verification_token text,
+      email_verification_code text,
       email_verification_sent_at timestamptz,
       password_reset_code text,
       password_reset_sent_at timestamptz,
+      password_change_code text,
+      password_change_sent_at timestamptz,
       deleted_at timestamptz,
       created_at timestamp not null default now()
     );
@@ -31,9 +34,12 @@ export async function ensureAppTables() {
   await pool.query(`alter table users add column if not exists email text;`);
   await pool.query(`alter table users add column if not exists email_verified boolean not null default false;`);
   await pool.query(`alter table users add column if not exists email_verification_token text;`);
+  await pool.query(`alter table users add column if not exists email_verification_code text;`);
   await pool.query(`alter table users add column if not exists email_verification_sent_at timestamptz;`);
   await pool.query(`alter table users add column if not exists password_reset_code text;`);
   await pool.query(`alter table users add column if not exists password_reset_sent_at timestamptz;`);
+  await pool.query(`alter table users add column if not exists password_change_code text;`);
+  await pool.query(`alter table users add column if not exists password_change_sent_at timestamptz;`);
   await pool.query(`alter table users add column if not exists deleted_at timestamptz;`);
   // Unique email (allows multiple NULLs)
   await pool.query(`create unique index if not exists users_email_uidx on users (email);`);
