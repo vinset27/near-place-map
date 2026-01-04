@@ -184,6 +184,8 @@ export async function ensureAppTables() {
       cover_url text,
       photos text[],
       videos text[],
+      lat double precision,
+      lng double precision,
       moderation_status text not null default 'pending',
       moderation_reason text,
       moderated_at timestamptz,
@@ -191,6 +193,8 @@ export async function ensureAppTables() {
     );
   `);
   await pool.query(`alter table events add column if not exists videos text[];`);
+  await pool.query(`alter table events add column if not exists lat double precision;`);
+  await pool.query(`alter table events add column if not exists lng double precision;`);
   await pool.query(`alter table events add column if not exists moderation_status text not null default 'pending';`);
   await pool.query(`alter table events add column if not exists moderation_reason text;`);
   await pool.query(`alter table events add column if not exists moderated_at timestamptz;`);

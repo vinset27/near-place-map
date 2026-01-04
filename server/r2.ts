@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import crypto from "crypto";
 import dotenv from "dotenv";
@@ -108,6 +108,18 @@ export async function presignEventMediaPut(params: {
     : undefined;
 
   return { key, url, publicUrl };
+}
+
+export async function presignEventMediaGet(params: { key: string }) {
+  const r2 = getR2Client();
+  if (!r2) return null;
+  const cmd = new GetObjectCommand({
+    Bucket: r2.config.bucket,
+    Key: params.key,
+  });
+  const url = await getSignedUrl(r2.client, cmd, { expiresIn: 60 * 5 });
+  const publicUrl = r2.config.publicBaseUrl ? `${r2.config.publicBaseUrl.replace(/\/$/, "")}/${params.key}` : undefined;
+  return { url, publicUrl };
 }
 
 

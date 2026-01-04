@@ -21,7 +21,7 @@ import { db, ensureAppTables } from "./db";
 import { pool } from "./db";
 import { and, desc, eq, gte, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { presignBusinessPhotoPut, presignEventMediaPut } from "./r2";
+import { presignBusinessPhotoPut, presignEventMediaGet, presignEventMediaPut } from "./r2";
 import { googlePlacesNearbyAll, mapGoogleTypesToCategory } from "./googlePlaces";
 import { resendSendEmail } from "./resend";
 import { sendExpoPush } from "./push";
@@ -663,7 +663,24 @@ export async function registerRoutes(
     const userId = String(req.session.userId || "");
     const out = await presignEventMediaPut({ ...parsed.data, userId });
     if (!out || !out.url) return res.status(503).json({ message: "R2 not configured" });
-    return res.json({ putUrl: out.url, publicUrl: out.publicUrl || null, key: out.key });
+    // Always provide a usable URL: prefer publicBaseUrl, else provide an API redirect that resolves to a signed GET.
+    const proto = String((req.headers["x-forwarded-proto"] as any) || req.protocol || "https");
+    const host = String((req.headers["x-forwarded-host"] as any) || req.get("host") || "");
+    const base = host ? `${proto}://${host}` : "";
+    const fallbackPublic = out.key ? `${base}/api/events/media/public/${encodeURIComponent(out.key)}` : null;
+    return res.json({ putUrl: out.url, publicUrl: out.publicUrl || fallbackPublic || null, key: out.key });
+  }));
+
+  // Public: resolve an event media key to a public URL (prefer real publicBaseUrl, else signed GET redirect).
+  app.get("/api/events/media/public/:key", asyncHandler(async (req, res) => {
+    const key = String(req.params.key || "").trim();
+    if (!key || key.length > 500) return res.status(400).send("bad key");
+    // Basic guard: only allow our event media prefix.
+    if (!key.startsWith("events/")) return res.status(400).send("bad key");
+    const out = await presignEventMediaGet({ key });
+    if (!out) return res.status(503).send("R2 not configured");
+    const target = out.publicUrl || out.url;
+    return res.redirect(302, target);
   }));
 
   // Business application — creates a pending request.
@@ -1755,27 +1772,82 @@ export async function registerRoutes(
       .limit(Math.min(6000, limit * 8));
 
     const out = rows
-      .filter((r) => r.est && Number.isFinite((r.est as any).lat) && Number.isFinite((r.est as any).lng))
+      .filter((r) => r.est)
       .map((r) => {
         const est = r.est as any;
-        const dist = haversineMeters(origin, { lat: est.lat, lng: est.lng });
+        const ev = r.ev as any;
+        const evLat = Number(ev?.lat);
+        const evLng = Number(ev?.lng);
+        const baseLat = Number.isFinite(evLat) ? evLat : Number(est?.lat);
+        const baseLng = Number.isFinite(evLng) ? evLng : Number(est?.lng);
+        if (!Number.isFinite(baseLat) || !Number.isFinite(baseLng)) return null;
+        const dist = haversineMeters(origin, { lat: baseLat, lng: baseLng });
         return {
-          ...r.ev,
+          ...ev,
+          lat: baseLat,
+          lng: baseLng,
           distanceMeters: dist,
           establishment: est,
           organizer: {
-            userId: String((r.user as any)?.id || r.ev.userId),
+            userId: String((r.user as any)?.id || ev.userId),
             name: String((r.prof as any)?.name || (r.user as any)?.username || "Organisateur"),
             avatarUrl: (r.prof as any)?.avatarUrl || null,
           },
         };
       })
+      .filter(Boolean)
       .filter((x) => x.distanceMeters <= radiusM)
       .sort((a, b) => a.distanceMeters - b.distanceMeters)
       .slice(0, limit);
 
     return res.json({ events: out });
   });
+
+  // Events (public): by id (for event details screen)
+  app.get("/api/events/:id", asyncHandler(async (req, res) => {
+    if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+    const id = String(req.params.id || "").trim();
+    if (!isUuidLike(id)) return res.status(400).json({ message: "Invalid id" });
+
+    const rows = await db
+      .select({
+        ev: events,
+        est: establishments,
+        prof: establishmentProfiles,
+        user: users,
+      })
+      .from(events)
+      .leftJoin(establishments, eq(events.establishmentId, establishments.id))
+      .leftJoin(establishmentProfiles, eq(events.userId, establishmentProfiles.userId))
+      .leftJoin(users, eq(events.userId, users.id))
+      .where(eq(events.id, id as any))
+      .limit(1);
+    const row = rows[0] as any;
+    if (!row?.ev) return res.status(404).json({ message: "Not found" });
+    if (row.ev.published !== true) return res.status(404).json({ message: "Not found" });
+    if (row.est && row.est.published !== true) return res.status(404).json({ message: "Not found" });
+
+    const ev = row.ev as any;
+    const est = row.est as any;
+    const evLat = Number(ev?.lat);
+    const evLng = Number(ev?.lng);
+    const baseLat = Number.isFinite(evLat) ? evLat : Number(est?.lat);
+    const baseLng = Number.isFinite(evLng) ? evLng : Number(est?.lng);
+
+    return res.json({
+      event: {
+        ...ev,
+        lat: Number.isFinite(baseLat) ? baseLat : null,
+        lng: Number.isFinite(baseLng) ? baseLng : null,
+        establishment: est || null,
+        organizer: {
+          userId: String((row.user as any)?.id || ev.userId),
+          name: String((row.prof as any)?.name || (row.user as any)?.username || "Organisateur"),
+          avatarUrl: (row.prof as any)?.avatarUrl || null,
+        },
+      },
+    });
+  }));
 
   // Events (pro): my events
   app.get("/api/events/me", requireAuth, async (req, res) => {
@@ -1811,6 +1883,8 @@ export async function registerRoutes(
         coverUrl: z.string().url().max(500).optional(),
         photos: z.array(z.string().url().max(500)).max(10).optional(),
         videos: z.array(z.string().url().max(500)).max(10).optional(),
+        lat: z.number().optional(),
+        lng: z.number().optional(),
       })
       .safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
@@ -1822,6 +1896,10 @@ export async function registerRoutes(
     if (String(est.ownerUserId || "") !== String(userId)) {
       return res.status(403).json({ message: "Not allowed for this establishment" });
     }
+
+    const lat = Number.isFinite(parsed.data.lat) ? Number(parsed.data.lat) : Number(est?.lat);
+    const lng = Number.isFinite(parsed.data.lng) ? Number(parsed.data.lng) : Number(est?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return res.status(400).json({ message: "lat/lng requis" });
 
     const rows = await db
       .insert(events)
@@ -1836,6 +1914,8 @@ export async function registerRoutes(
         coverUrl: parsed.data.coverUrl ?? null,
         photos: parsed.data.photos?.length ? parsed.data.photos : null,
         videos: parsed.data.videos?.length ? parsed.data.videos : null,
+        lat,
+        lng,
         moderationStatus: "pending",
         moderationReason: null,
         moderatedAt: null,

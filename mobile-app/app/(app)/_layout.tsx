@@ -120,6 +120,13 @@ export default function AppTabsLayout() {
           href: null,
         }}
       />
+
+      <Tabs.Screen
+        name="event/[id]"
+        options={{
+          href: null,
+        }}
+      />
     </Tabs>
   );
 }

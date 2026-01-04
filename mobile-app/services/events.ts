@@ -25,6 +25,8 @@ export type ApiEvent = {
   coverUrl?: string | null;
   photos?: string[] | null;
   videos?: string[] | null;
+  lat?: number | null;
+  lng?: number | null;
   moderationStatus?: 'pending' | 'approved' | 'rejected' | string;
   moderationReason?: string | null;
   moderatedAt?: string | null;
@@ -63,6 +65,8 @@ export async function createEvent(input: {
   coverUrl?: string;
   photos?: string[];
   videos?: string[];
+  lat?: number;
+  lng?: number;
   liveUrl?: string;
   videoUrl?: string;
 }): Promise<ApiEvent> {

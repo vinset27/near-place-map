@@ -226,6 +226,16 @@ export default function EventsScreen() {
           renderItem={({ item }: any) => (
             <EventCard
               item={item as any}
+              onPressDetails={() => {
+                if (isDemo) {
+                  setToast("Mode démo: les détails ne sont pas disponibles (backend hors‑ligne).");
+                  setTimeout(() => setToast(null), 2200);
+                  return;
+                }
+                const evId = String(item?.id || '').trim();
+                if (!evId) return;
+                router.push(`/event/${evId}` as any);
+              }}
               onPressEstablishment={() => {
                 if (isDemo) {
                   setToast("Mode démo: les établissements ne sont pas disponibles (backend hors‑ligne).");
@@ -299,8 +309,9 @@ function LiveCard(props: { item: any; onPressEstablishment: () => void }) {
 function EventCard(props: {
   item: any;
   onPressEstablishment: () => void;
+  onPressDetails: () => void;
 }) {
-  const { item, onPressEstablishment } = props;
+  const { item, onPressEstablishment, onPressDetails } = props;
   const t = useAppTheme();
   const est = item.establishment;
   const dist = item?._distanceMeters != null ? formatDistance(Number(item._distanceMeters)) : null;
@@ -315,7 +326,7 @@ function EventCard(props: {
 
   return (
     <View style={[styles.eventCard, { backgroundColor: t.card, borderColor: t.border }]}>
-      <View style={styles.coverWrap}>
+      <TouchableOpacity activeOpacity={0.92} onPress={onPressDetails} style={styles.coverWrap}>
         <PlaceImage uri={cover} id={`${String(item.id)}-cover`} name={String(item.title)} category={est?.category} style={styles.cover} textSize={42} />
         <View style={styles.coverShade} />
 
@@ -342,7 +353,7 @@ function EventCard(props: {
             </Text>
           </View>
         </View>
-      </View>
+      </TouchableOpacity>
 
       {!!est && (
         <View style={{ marginTop: 10 }}>
@@ -355,6 +366,14 @@ function EventCard(props: {
               <Text style={styles.watchCtaText}>{String(item.category || '').toLowerCase() === 'live' ? 'Regarder le live' : 'Voir la vidéo'}</Text>
             </TouchableOpacity>
           )}
+          <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
+            <TouchableOpacity activeOpacity={0.9} onPress={onPressEstablishment} style={[styles.ctaGhost, { flex: 1, borderColor: t.border, backgroundColor: t.input }]}>
+              <Text style={[styles.ctaGhostText, { color: t.text }]}>Voir lieu</Text>
+            </TouchableOpacity>
+            <TouchableOpacity activeOpacity={0.9} onPress={onPressDetails} style={[styles.cta, { flex: 1, backgroundColor: t.primary }]}>
+              <Text style={styles.ctaText}>Détails</Text>
+            </TouchableOpacity>
+          </View>
           <EstablishmentCard item={est} onPress={onPressEstablishment} />
         </View>
       )}

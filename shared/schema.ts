@@ -109,6 +109,8 @@ export const events = pgTable("events", {
   coverUrl: text("cover_url"),
   photos: text("photos").array(),
   videos: text("videos").array(),
+  lat: doublePrecision("lat"),
+  lng: doublePrecision("lng"),
   moderationStatus: text("moderation_status").notNull().default("pending"),
   moderationReason: text("moderation_reason"),
   moderatedAt: timestamp("moderated_at", { withTimezone: true }),

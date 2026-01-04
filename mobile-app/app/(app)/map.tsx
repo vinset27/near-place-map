@@ -16,6 +16,7 @@ import {
   Platform,
   Image,
   Keyboard,
+  Share,
 } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE, Region } from 'react-native-maps';
 import { useRouter } from 'expo-router';
@@ -35,6 +36,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFavoritesStore } from '../../stores/useFavoritesStore';
 import { setFavorite } from '../../services/favoritesApi';
 import { OfflineBanner } from '../../components/UI/OfflineBanner';
+import { fetchEventsNearby } from '../../services/events';
 import { demoEvents, getUpcomingEventsForEstablishments } from '../../services/events';
 import { useStableQueryOrigin } from '../../services/queryOrigin';
 import { getOnboardingIntent } from '../../services/onboarding';
@@ -146,6 +148,8 @@ export default function MapScreen() {
   const [selectedMarker, setSelectedMarker] = useState<string | null>(null);
   const [selectedUserEventId, setSelectedUserEventId] = useState<string | null>(null);
   const [showUserEvents, setShowUserEvents] = useState(true);
+  const [showProEvents, setShowProEvents] = useState(true);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   // Keep the map clean by default (user can open filters when needed).
   const [panelOpen, setPanelOpen] = useState(false);
   const mapType = useSettingsStore((s) => s.mapType);
@@ -253,6 +257,16 @@ export default function MapScreen() {
     retry: false,
   });
 
+  const { data: proEvents } = useQuery({
+    queryKey: ['events', origin.lat, origin.lng, radiusKm],
+    enabled: canQuery && showProEvents,
+    queryFn: () => fetchEventsNearby({ lat: origin.lat, lng: origin.lng, radiusKm, withinHours: 72, limit: 350 }),
+    staleTime: 1000 * 60,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
+    retry: false,
+  });
+
   // Filtrer les établissements affichés
   const filteredEstablishments = useMemo(() => {
     if (!establishments) return [];
@@ -353,6 +367,7 @@ export default function MapScreen() {
 
   const selectedEstablishment = filteredEstablishments.find((e) => e.id === selectedMarker);
   const selectedUserEvent = (userEvents || []).find((e: any) => String(e?.id) === String(selectedUserEventId));
+  const selectedProEvent = (proEvents || []).find((e: any) => String(e?.id) === String(selectedEventId));
 
   const visibleUserEvents = useMemo(() => {
     const items = Array.isArray(userEvents) ? userEvents : [];
@@ -369,6 +384,27 @@ export default function MapScreen() {
     // keep it reasonable
     return inView.slice(0, 160);
   }, [region.latitude, region.longitude, region.latitudeDelta, region.longitudeDelta, userEvents]);
+
+  const visibleProEvents = useMemo(() => {
+    const items = Array.isArray(proEvents) ? proEvents : [];
+    if (!items.length) return [];
+    const latMin = region.latitude - region.latitudeDelta / 2;
+    const latMax = region.latitude + region.latitudeDelta / 2;
+    const lngMin = region.longitude - region.longitudeDelta / 2;
+    const lngMax = region.longitude + region.longitudeDelta / 2;
+    const inView = items.filter((e: any) => {
+      const lat = Number(e?.lat);
+      const lng = Number(e?.lng);
+      return Number.isFinite(lat) && Number.isFinite(lng) && lat >= latMin && lat <= latMax && lng >= lngMin && lng <= lngMax;
+    });
+    const MAX = 240;
+    const sliced = inView.slice(0, MAX);
+    if (selectedEventId) {
+      const sel = items.find((x: any) => String(x?.id) === String(selectedEventId));
+      if (sel && !sliced.some((x: any) => String(x?.id) === String(sel?.id))) sliced.unshift(sel);
+    }
+    return sliced;
+  }, [proEvents, region.latitude, region.longitude, region.latitudeDelta, region.longitudeDelta, selectedEventId]);
 
   const getCategoryColor = (category: string): string => {
     const cat = ESTABLISHMENT_CATEGORIES.find((c) => c.id === category);
@@ -469,10 +505,27 @@ export default function MapScreen() {
               onPress={() => {
                 setSelectedUserEventId(String(ev.id));
                 setSelectedMarker(null);
+                setSelectedEventId(null);
                 setPanelOpen(false);
                 Keyboard.dismiss();
               }}
               pinColor={String(ev.kind) === 'meet' ? '#22c55e' : '#ef4444'}
+            />
+          ))}
+
+        {showProEvents &&
+          visibleProEvents.map((ev: any) => (
+            <Marker
+              key={`ev-${String(ev.id)}`}
+              coordinate={{ latitude: Number(ev.lat), longitude: Number(ev.lng) }}
+              onPress={() => {
+                setSelectedEventId(String(ev.id));
+                setSelectedMarker(null);
+                setSelectedUserEventId(null);
+                setPanelOpen(false);
+                Keyboard.dismiss();
+              }}
+              pinColor="#8b5cf6"
             />
           ))}
         {visibleEstablishments.map((establishment) => (
@@ -640,6 +693,16 @@ export default function MapScreen() {
               style={[styles.smallToggle, { backgroundColor: t.input, borderColor: t.border }]}
             >
               <Text style={{ color: t.text, fontWeight: '900' }}>{showUserEvents ? 'ON' : 'OFF'}</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
+            <Text style={{ color: t.muted, fontWeight: '900' }}>Événements</Text>
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={() => setShowProEvents((v) => !v)}
+              style={[styles.smallToggle, { backgroundColor: t.input, borderColor: t.border }]}
+            >
+              <Text style={{ color: t.text, fontWeight: '900' }}>{showProEvents ? 'ON' : 'OFF'}</Text>
             </TouchableOpacity>
           </View>
           </View>
@@ -890,15 +953,91 @@ export default function MapScreen() {
                 <Text style={[styles.mapCtaGhostText, { color: t.text }]}>Fermer</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.mapCtaPrimary, { backgroundColor: t.primary }]}
-                onPress={() => {
+                style={[styles.mapCtaGhost, { backgroundColor: t.input, borderColor: t.border }]}
+                onPress={async () => {
                   const lat = Number((selectedUserEvent as any).lat);
                   const lng = Number((selectedUserEvent as any).lng);
                   const url = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
-                  Linking.openURL(url).catch(() => {});
+                  const msg = `Rejoins-moi ici: ${url}\n\nDécouvre O'Show: https://near-place-map.onrender.com/`;
+                  await Share.share({ message: msg }).catch(() => {});
                 }}
               >
-                <Text style={[styles.mapCtaPrimaryText, { color: '#fff' }]}>Ouvrir Maps</Text>
+                <Text style={[styles.mapCtaGhostText, { color: t.text }]}>Partager</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.mapCtaPrimary, { backgroundColor: t.primary }]}
+                onPress={() =>
+                  router.push({
+                    pathname: '/navigation',
+                    params: {
+                      mode: 'driving',
+                      lat: String((selectedUserEvent as any).lat),
+                      lng: String((selectedUserEvent as any).lng),
+                      name: String((selectedUserEvent as any)?.title || 'Soirée'),
+                      category: 'event',
+                    },
+                  } as any)
+                }
+              >
+                <Text style={[styles.mapCtaPrimaryText, { color: '#fff' }]}>Itinéraire</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </BottomSheet>
+      )}
+
+      {selectedProEvent && (
+        <BottomSheet
+          snapPoints={[140, 300]}
+          initialSnapIndex={1}
+          backdrop={false}
+          backgroundColor={t.isDark ? 'rgba(15,23,42,0.98)' : 'rgba(255,255,255,0.96)'}
+          contentStyle={{ paddingHorizontal: 16, paddingBottom: 10 }}
+          bottomOffset={tabBarOffset + insets.bottom}
+        >
+          <View style={{ paddingTop: 6 }}>
+            <Text style={{ color: t.text, fontWeight: '950', fontSize: 16 }} numberOfLines={2}>
+              {String((selectedProEvent as any)?.title || 'Événement')}
+            </Text>
+            <Text style={{ marginTop: 6, color: t.muted, fontWeight: '800' }} numberOfLines={2}>
+              {(selectedProEvent as any)?.establishment?.name ? `${(selectedProEvent as any).establishment.name} • ` : ''}
+              {new Date((selectedProEvent as any).startsAt).toLocaleString()}
+            </Text>
+            <View style={styles.mapCtas}>
+              <TouchableOpacity
+                style={[styles.mapCtaGhost, { backgroundColor: t.input, borderColor: t.border }]}
+                onPress={() => router.push(`/event/${String((selectedProEvent as any).id)}` as any)}
+              >
+                <Text style={[styles.mapCtaGhostText, { color: t.text }]}>Détails</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.mapCtaGhost, { backgroundColor: t.input, borderColor: t.border }]}
+                onPress={async () => {
+                  const lat = Number((selectedProEvent as any).lat);
+                  const lng = Number((selectedProEvent as any).lng);
+                  const url = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+                  const msg = `Événement: ${String((selectedProEvent as any).title || '')}\nLieu: ${url}\n\nDécouvre O'Show: https://near-place-map.onrender.com/`;
+                  await Share.share({ message: msg }).catch(() => {});
+                }}
+              >
+                <Text style={[styles.mapCtaGhostText, { color: t.text }]}>Partager</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.mapCtaPrimary, { backgroundColor: '#8b5cf6' }]}
+                onPress={() =>
+                  router.push({
+                    pathname: '/navigation',
+                    params: {
+                      mode: 'driving',
+                      lat: String((selectedProEvent as any).lat),
+                      lng: String((selectedProEvent as any).lng),
+                      name: String((selectedProEvent as any)?.title || 'Événement'),
+                      category: 'event',
+                    },
+                  } as any)
+                }
+              >
+                <Text style={[styles.mapCtaPrimaryText, { color: '#fff' }]}>Itinéraire</Text>
               </TouchableOpacity>
             </View>
           </View>

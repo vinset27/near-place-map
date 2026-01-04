@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, Alert, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -41,6 +41,8 @@ export default function EventCreateScreen() {
   const [mediaUploading, setMediaUploading] = useState(false);
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [videoUrls, setVideoUrls] = useState<string[]>([]);
+  const [eventLat, setEventLat] = useState<number>(origin.lat);
+  const [eventLng, setEventLng] = useState<number>(origin.lng);
 
   const { data: me } = useQuery({
     queryKey: ['auth-me'],
@@ -83,6 +85,8 @@ export default function EventCreateScreen() {
         coverUrl: photoUrls[0] || undefined,
         photos: photoUrls.length ? photoUrls : undefined,
         videos: videoUrls.length ? videoUrls : undefined,
+        lat: eventLat,
+        lng: eventLng,
       });
       await qc.invalidateQueries({ queryKey: ['pro-my-events'] });
       Alert.alert('En attente', 'Ton événement est en attente de validation admin avant publication.', [{ text: 'OK' }]);
@@ -99,6 +103,13 @@ export default function EventCreateScreen() {
   const selectedLat = Number((selected as any)?.lat);
   const selectedLng = Number((selected as any)?.lng);
   const canShowMap = Number.isFinite(selectedLat) && Number.isFinite(selectedLng);
+
+  // When user selects an establishment, default the event pin to that location.
+  useEffect(() => {
+    if (!Number.isFinite(selectedLat) || !Number.isFinite(selectedLng)) return;
+    setEventLat(selectedLat);
+    setEventLng(selectedLng);
+  }, [selectedLat, selectedLng]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -237,7 +248,7 @@ export default function EventCreateScreen() {
           {canShowMap && (
             <View style={[styles.card, { marginTop: 0 }]}>
               <Text style={styles.label}>Localisation (carte)</Text>
-              <Text style={styles.hint}>Position basée sur l’établissement sélectionné • votre position est aussi affichée.</Text>
+              <Text style={styles.hint}>Choisis un point sur la carte (par défaut: établissement). Appuie sur la carte pour déplacer le pin.</Text>
               <View style={styles.mapWrap}>
                 <MapView
                   provider={useGoogleProvider ? PROVIDER_GOOGLE : undefined}
@@ -250,8 +261,23 @@ export default function EventCreateScreen() {
                   }}
                   rotateEnabled={false}
                   pitchEnabled={false}
+                  onPress={(e) => {
+                    const c = e.nativeEvent.coordinate;
+                    setEventLat(c.latitude);
+                    setEventLng(c.longitude);
+                  }}
                 >
-                  <Marker coordinate={{ latitude: selectedLat, longitude: selectedLng }} title={String((selected as any)?.name || 'Établissement')} />
+                  <Marker
+                    coordinate={{ latitude: eventLat, longitude: eventLng }}
+                    draggable
+                    onDragEnd={(e) => {
+                      const c = e.nativeEvent.coordinate;
+                      setEventLat(c.latitude);
+                      setEventLng(c.longitude);
+                    }}
+                    title={String((selected as any)?.name || 'Événement')}
+                    pinColor="#8b5cf6"
+                  />
                   {Number.isFinite(origin?.lat) && Number.isFinite(origin?.lng) && (
                     <Marker coordinate={{ latitude: Number(origin.lat), longitude: Number(origin.lng) }} title="Vous" />
                   )}
