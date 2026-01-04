@@ -963,7 +963,7 @@ export async function registerRoutes(
     const userId = req.session.userId!;
     const parsed = z.object({ code: z.string().min(4).max(12) }).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
-    const code = String(parsed.data.code).trim();
+    const code = String(parsed.data.code || "").trim().replace(/\D/g, "").slice(0, 6);
     if (!/^\d{6}$/.test(code)) return res.status(400).json({ message: "Code invalide" });
 
     const rows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
@@ -974,7 +974,7 @@ export async function registerRoutes(
     const sentAt = u.emailVerificationSentAt ? Date.parse(String(u.emailVerificationSentAt)) : 0;
     if (!u.emailVerificationCode || !sentAt) return res.status(400).json({ message: "Code invalide" });
     if (Date.now() - sentAt > 15 * 60_000) return res.status(400).json({ message: "Code expiré" });
-    if (String(u.emailVerificationCode) !== code) return res.status(400).json({ message: "Code invalide" });
+    if (String(u.emailVerificationCode).replace(/\D/g, "").slice(0, 6) !== code) return res.status(400).json({ message: "Code invalide" });
 
     await db
       .update(users)
@@ -1290,7 +1290,7 @@ export async function registerRoutes(
     const userId = req.session.userId!;
     const parsed = z.object({ code: z.string().min(4).max(12), newPassword: z.string().min(6).max(200) }).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
-    const code = String(parsed.data.code).trim();
+    const code = String(parsed.data.code || "").trim().replace(/\D/g, "").slice(0, 6);
     if (!/^\d{6}$/.test(code)) return res.status(400).json({ message: "Code invalide" });
 
     const rows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
@@ -1300,7 +1300,7 @@ export async function registerRoutes(
     const sentAt = u.passwordChangeSentAt ? Date.parse(String(u.passwordChangeSentAt)) : 0;
     if (!u.passwordChangeCode || !sentAt) return res.status(400).json({ message: "Code invalide" });
     if (Date.now() - sentAt > 15 * 60_000) return res.status(400).json({ message: "Code expiré" });
-    if (String(u.passwordChangeCode) !== code) return res.status(400).json({ message: "Code invalide" });
+    if (String(u.passwordChangeCode).replace(/\D/g, "").slice(0, 6) !== code) return res.status(400).json({ message: "Code invalide" });
 
     await db
       .update(users)
