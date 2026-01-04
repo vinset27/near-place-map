@@ -57,7 +57,8 @@ export default function VerifyEmailScreen() {
   const resend = async () => {
     setLoading(true);
     try {
-      await resendEmailVerification();
+      const mail = isAuthed ? String((me as any)?.email || (me as any)?.username || '') : String(email || '');
+      await resendEmailVerification(mail);
       setToast('Code envoyé par email.');
     } catch (e: any) {
       setToast(String(e?.response?.data?.message || e?.message || 'Erreur'));
@@ -174,9 +175,14 @@ export default function VerifyEmailScreen() {
               </TouchableOpacity>
 
               <TouchableOpacity
-                disabled={loading || !isAuthed}
+                disabled={loading || !(isAuthed || String(email || '').includes('@'))}
                 onPress={resend}
-                style={{ alignSelf: 'center', paddingVertical: 8, paddingHorizontal: 10, opacity: loading || !isAuthed ? 0.55 : 1 }}
+                style={{
+                  alignSelf: 'center',
+                  paddingVertical: 8,
+                  paddingHorizontal: 10,
+                  opacity: loading || !(isAuthed || String(email || '').includes('@')) ? 0.55 : 1,
+                }}
               >
                 <Text style={{ color: 'rgba(11,18,32,0.55)', fontSize: 12, fontWeight: '400', textDecorationLine: 'underline' }}>
                   Renvoyer le code

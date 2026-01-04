@@ -85,7 +85,15 @@ export default function RegisterScreen() {
     <SafeAreaView style={[styles.safe, { backgroundColor: t.bg }]}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }} keyboardVerticalOffset={0}>
         <ScrollView bounces={false} contentContainerStyle={{ flexGrow: 1, paddingBottom: 28 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-          <PublicScaffold heroImage={HERO_IMAGE} cardTitle="Créer un compte" cardSubtitle="Quelques secondes et c’est parti" onBack={() => router.back()}>
+          <PublicScaffold
+            heroImage={HERO_IMAGE}
+            cardTitle="Créer un compte"
+            cardSubtitle="Quelques secondes et c’est parti"
+            onBack={() => {
+              if ((router as any)?.canGoBack?.()) router.back();
+              else router.replace('/map');
+            }}
+          >
             <LinearGradient colors={[tint.fieldA, tint.fieldB]} style={styles.pill}>
               <Ionicons name="person-outline" size={18} color="rgba(11,18,32,0.62)" />
               <TextInput

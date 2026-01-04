@@ -34,8 +34,8 @@ export async function authLogout(): Promise<void> {
   await api.post('/api/auth/logout');
 }
 
-export async function resendEmailVerification(): Promise<{ ok: boolean; alreadyVerified?: boolean }> {
-  const res = await api.post('/api/auth/resend-verification');
+export async function resendEmailVerification(email?: string): Promise<{ ok: boolean; alreadyVerified?: boolean }> {
+  const res = await api.post('/api/auth/resend-verification', email ? { email: String(email).trim() } : {});
   return res.data as any;
 }
 

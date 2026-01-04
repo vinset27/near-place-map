@@ -1457,20 +1457,47 @@ export async function registerRoutes(
   }));
 
   // Resend verification email (Pro onboarding helper)
-  app.post("/api/auth/resend-verification", requireAuth, asyncHandler(async (req, res) => {
+  // Supports:
+  // - authenticated session (standard)
+  // - unauthenticated { email } (fallback when cookies/session aren't available on mobile)
+  app.post("/api/auth/resend-verification", asyncHandler(async (req, res) => {
     if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
-    const userId = req.session.userId!;
-    const rowsUser = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-    const u = rowsUser[0] as any;
-    if (!u) return res.status(401).json({ message: "Unauthorized" });
-    const email = String(u.email || u.username || "").trim().toLowerCase();
-    if (!email || !looksLikeEmail(email)) return res.status(400).json({ message: "Email invalide sur le compte." });
-    if (u.emailVerified) return res.json({ ok: true, alreadyVerified: true });
+    const parsed = z.object({ email: z.string().min(3).max(200).optional() }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+
+    const sessionUserId = req.session?.userId ? String(req.session.userId) : "";
+    let u: any = null;
+    let email = "";
+    const isSession = !!sessionUserId;
+    if (isSession) {
+      const rowsUser = await db.select().from(users).where(eq(users.id, sessionUserId)).limit(1);
+      u = rowsUser[0] as any;
+      if (!u) return res.status(401).json({ message: "Unauthorized" });
+      email = String(u.email || u.username || "").trim().toLowerCase();
+      if (!email || !looksLikeEmail(email)) return res.status(400).json({ message: "Email invalide sur le compte." });
+      if (u.emailVerified) return res.json({ ok: true, alreadyVerified: true });
+    } else {
+      email = String(parsed.data.email || "").trim().toLowerCase();
+      // Don't leak account existence: return ok for invalid email too.
+      if (!email || !looksLikeEmail(email)) return res.json({ ok: true });
+      const rowsUser = await db
+        .select()
+        .from(users)
+        .where(or(sql`lower(trim(${users.email})) = ${email}`, sql`lower(trim(${users.username})) = ${email}`))
+        .limit(1);
+      u = rowsUser[0] as any;
+      if (!u || u.deletedAt) return res.json({ ok: true });
+      if (u.emailVerified) return res.json({ ok: true, alreadyVerified: true });
+    }
 
     // Basic anti-spam: 1 email / 60s
-    const last = u.emailVerificationSentAt ? Date.parse(String(u.emailVerificationSentAt)) : 0;
-    if (last && Date.now() - last < 60_000) {
-      return res.status(429).json({ message: "Veuillez patienter avant de renvoyer l’email." });
+    const lastMs =
+      u.emailVerificationSentAt instanceof Date
+        ? u.emailVerificationSentAt.getTime()
+        : (u.emailVerificationSentAt ? Date.parse(String(u.emailVerificationSentAt)) : 0);
+    if (lastMs && Date.now() - lastMs < 60_000) {
+      // Session path gets a clear message; email-only path remains non-enumerating.
+      return isSession ? res.status(429).json({ message: "Veuillez patienter avant de renvoyer l’email." }) : res.json({ ok: true });
     }
 
     const token = makeToken(24);
@@ -1483,7 +1510,7 @@ export async function registerRoutes(
         emailVerificationCode: code,
         emailVerificationSentAt: new Date(),
       })
-      .where(eq(users.id, userId));
+      .where(eq(users.id, String(u.id)));
 
     try {
       await resendSendEmail({
@@ -1501,10 +1528,14 @@ export async function registerRoutes(
       });
     } catch (e: any) {
       console.warn("[Resend] email verification resend failed:", e?.message || e);
-      return res.status(503).json({
-        message:
-          "Service email indisponible. Vérifie RESEND_KEY_API/RESEND_API_KEY et RESEND_FROM (ou vérifie le domaine d’envoi dans Resend).",
-      });
+      // Session path returns error; email-only path stays silent.
+      if (isSession) {
+        return res.status(503).json({
+          message:
+            "Service email indisponible. Vérifie RESEND_KEY_API/RESEND_API_KEY et RESEND_FROM (ou vérifie le domaine d’envoi dans Resend).",
+        });
+      }
+      return res.json({ ok: true });
     }
 
     return res.json({ ok: true });
