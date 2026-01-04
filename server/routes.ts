@@ -2,6 +2,7 @@ import type { Express } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
 import session from "express-session";
+import connectPgSimple from "connect-pg-simple";
 import MemoryStoreFactory from "memorystore";
 import crypto from "crypto";
 import {
@@ -276,6 +277,15 @@ export async function registerRoutes(
 
   const MemoryStore = MemoryStoreFactory(session);
   const isProd = process.env.NODE_ENV === "production";
+  const PgSession = connectPgSimple(session);
+  const sessionStore =
+    isProd && pool
+      ? new PgSession({
+          pool: pool as any,
+          tableName: "session",
+          createTableIfMissing: true,
+        })
+      : new MemoryStore({ checkPeriod: 1000 * 60 * 60 });
 
   app.use(
     session({
@@ -290,7 +300,7 @@ export async function registerRoutes(
         secure: isProd,
         maxAge: 1000 * 60 * 60 * 24 * 14,
       },
-      store: new MemoryStore({ checkPeriod: 1000 * 60 * 60 }),
+      store: sessionStore as any,
     }),
   );
 

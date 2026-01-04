@@ -151,6 +151,12 @@ export default function ProfileEstablishmentScreen() {
       await qc.invalidateQueries({ queryKey: ['pro-profile'] });
       router.replace('/business');
     } catch (e: any) {
+      const status = Number(e?.response?.status);
+      if (status === 401) {
+        setError('Session expirée. Reconnecte-toi puis réessaie.');
+        router.replace('/login');
+        return;
+      }
       setError(String(e?.response?.data?.message || e?.message || 'Erreur'));
     } finally {
       setLoading(false);

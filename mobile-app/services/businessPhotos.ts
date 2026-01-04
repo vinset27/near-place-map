@@ -6,6 +6,7 @@
  */
 
 import api from './api';
+import * as FileSystem from 'expo-file-system';
 
 export type PresignResponse = {
   putUrl: string;
@@ -25,17 +26,13 @@ export async function uploadToPresignedPutUrl(params: {
   localUri: string;
   contentType: string;
 }): Promise<void> {
-  // Avoid expo-file-system (was causing Metro resolution error on iOS).
-  // Expo/RN supports fetching file:// URIs -> Blob in most cases for ImagePicker output.
-  const fileRes = await fetch(params.localUri);
-  const blob = await fileRes.blob();
-
-  const res = await fetch(params.putUrl, {
-    method: 'PUT',
+  // Stream upload (prevents loading large videos into memory).
+  const res = await FileSystem.uploadAsync(params.putUrl, params.localUri, {
+    httpMethod: 'PUT',
     headers: { 'Content-Type': params.contentType },
-    body: blob,
+    uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
   });
-  if (!res.ok) throw new Error(`Upload failed (status=${res.status})`);
+  if (res.status < 200 || res.status >= 300) throw new Error(`Upload failed (status=${res.status})`);
 }
 
 

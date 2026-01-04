@@ -15,6 +15,7 @@ import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
 import { uploadEventMedia } from '../../services/eventMedia';
+import * as FileSystem from 'expo-file-system';
 
 function presetIso(kind: '2h' | 'tonight' | 'tomorrow'): string {
   const now = new Date();
@@ -72,6 +73,7 @@ export default function EventCreateScreen() {
   );
 
   const canSubmit = !!selected && title.trim().length >= 3 && !saving;
+  const MAX_VIDEO_BYTES = 100 * 1024 * 1024; // 100 MB
 
   const submit = async () => {
     if (!selected) return;
@@ -176,6 +178,7 @@ export default function EventCreateScreen() {
                       videoMaxDuration: 60,
                     });
                     if (picked.canceled) return;
+                    const tooLarge: string[] = [];
                     for (const a of picked.assets) {
                       const uri = String((a as any).uri || '');
                       if (!uri) continue;
@@ -186,9 +189,29 @@ export default function EventCreateScreen() {
                       const mime =
                         String((a as any).mimeType || '').trim() ||
                         (String((a as any).type || '') === 'video' ? 'video/mp4' : 'image/jpeg');
+
+                      const isVideo = String((a as any).type || '').toLowerCase() === 'video' || mime.startsWith('video/');
+                      let sizeBytes = Number((a as any).fileSize);
+                      if (!Number.isFinite(sizeBytes)) {
+                        const info = await FileSystem.getInfoAsync(uri, { size: true }).catch(() => null as any);
+                        const s = Number(info?.size);
+                        if (Number.isFinite(s)) sizeBytes = s;
+                      }
+                      if (isVideo && Number.isFinite(sizeBytes) && sizeBytes > MAX_VIDEO_BYTES) {
+                        tooLarge.push(`${fileName} (${Math.ceil(sizeBytes / (1024 * 1024))}MB)`);
+                        continue;
+                      }
+
                       const url = await uploadEventMedia({ localUri: uri, contentType: mime, fileName });
                       if (mime.startsWith('video')) setVideoUrls((s) => [...s, url]);
                       else setPhotoUrls((s) => [...s, url]);
+                    }
+
+                    if (tooLarge.length) {
+                      Alert.alert(
+                        'Vidéo trop lourde',
+                        `Max 100MB par vidéo.\n\nRefusées:\n- ${tooLarge.slice(0, 6).join('\n- ')}${tooLarge.length > 6 ? `\n… +${tooLarge.length - 6}` : ''}`,
+                      );
                     }
                   } catch (e: any) {
                     Alert.alert('Upload', String(e?.message || 'Erreur upload'));

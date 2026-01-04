@@ -131,6 +131,12 @@ export default function PostRegisterFlow() {
           await qc.invalidateQueries({ queryKey: ['pro-profile'] }).catch(() => {});
           setStep(3);
         } catch (e: any) {
+          const status = Number(e?.response?.status);
+          if (status === 401) {
+            setErr('Session expirée. Reconnecte-toi puis continue.');
+            router.replace('/login');
+            return;
+          }
           setErr(String(e?.response?.data?.message || e?.message || 'Erreur'));
         } finally {
           setLoading(false);
