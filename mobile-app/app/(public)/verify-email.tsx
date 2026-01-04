@@ -24,6 +24,7 @@ export default function VerifyEmailScreen() {
   const isEmailVerified = !!me && (me as any)?.emailVerified !== false;
 
   const [code, setCode] = useState('');
+  const [email, setEmail] = useState('');
   const [toast, setToast] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<TextInput | null>(null);
@@ -41,7 +42,9 @@ export default function VerifyEmailScreen() {
 
   useEffect(() => {
     if (meLoading) return;
-    if (!isAuthed) router.replace('/login');
+    // If not authed, allow verifying with (email + code) on this same screen.
+    if (!isAuthed) return;
+    setEmail(String((me as any)?.email || (me as any)?.username || ''));
   }, [isAuthed, meLoading, router]);
 
   useEffect(() => {
@@ -68,7 +71,8 @@ export default function VerifyEmailScreen() {
     if (!/^\d{6}$/.test(c)) return setToast('Code invalide (6 chiffres).');
     setLoading(true);
     try {
-      await verifyEmailCode(c);
+      const mail = isAuthed ? String((me as any)?.email || (me as any)?.username || '') : String(email || '');
+      await verifyEmailCode(c, mail);
       await qc.invalidateQueries({ queryKey: ['auth-me'] });
       setToast('Email confirmé ✅');
       setCode('');
@@ -97,6 +101,21 @@ export default function VerifyEmailScreen() {
             {!!toast && <InlineToast text={toast} tone={toast.toLowerCase().includes('erreur') ? 'danger' : 'ok'} />}
 
             <View style={{ gap: 12, marginTop: 6 }}>
+              {!isAuthed && (
+                <LinearGradient colors={[tint.fieldA, tint.fieldB]} style={{ borderRadius: 999, paddingHorizontal: 14, paddingVertical: 12 }}>
+                  <TextInput
+                    value={email}
+                    onChangeText={setEmail}
+                    placeholder="Votre email"
+                    placeholderTextColor="rgba(11,18,32,0.45)"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    style={{ color: '#0b1220', fontWeight: '400' }}
+                  />
+                </LinearGradient>
+              )}
+
               {/* OTP boxes (6 digits) to avoid input misinterpretation */}
               <TouchableOpacity
                 activeOpacity={0.95}
@@ -154,14 +173,18 @@ export default function VerifyEmailScreen() {
                 </LinearGradient>
               </TouchableOpacity>
 
-              <TouchableOpacity disabled={loading} onPress={resend} style={{ alignSelf: 'center', paddingVertical: 8, paddingHorizontal: 10, opacity: loading ? 0.75 : 1 }}>
+              <TouchableOpacity
+                disabled={loading || !isAuthed}
+                onPress={resend}
+                style={{ alignSelf: 'center', paddingVertical: 8, paddingHorizontal: 10, opacity: loading || !isAuthed ? 0.55 : 1 }}
+              >
                 <Text style={{ color: 'rgba(11,18,32,0.55)', fontSize: 12, fontWeight: '400', textDecorationLine: 'underline' }}>
                   Renvoyer le code
                 </Text>
               </TouchableOpacity>
 
               <Text style={{ textAlign: 'center', color: 'rgba(11,18,32,0.55)', fontSize: 12, fontWeight: '400' }}>
-                Email: {String((me as any)?.email || (me as any)?.username || '—')}
+                Email: {isAuthed ? String((me as any)?.email || (me as any)?.username || '—') : String(email || '—')}
               </Text>
             </View>
           </PublicScaffold>

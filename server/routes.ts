@@ -1030,17 +1030,35 @@ export async function registerRoutes(
   }));
 
   // Email verification via code (preferred for mobile)
-  app.post("/api/auth/verify-email-code", requireAuth, asyncHandler(async (req, res) => {
+  // Supports both authenticated (session) and unauthenticated (email+code) verification.
+  app.post("/api/auth/verify-email-code", asyncHandler(async (req, res) => {
     if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
-    const userId = req.session.userId!;
-    const parsed = z.object({ code: z.string().min(4).max(12) }).safeParse(req.body);
+    const parsed = z
+      .object({
+        code: z.string().min(4).max(12),
+        email: z.string().min(3).max(200).optional(),
+      })
+      .safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
     const code = String(parsed.data.code || "").trim().replace(/\D/g, "").slice(0, 6);
     if (!/^\d{6}$/.test(code)) return res.status(400).json({ message: "Code invalide" });
 
-    const rows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const sessionUserId = req.session?.userId ? String(req.session.userId) : "";
+    let rows: any[] = [];
+    if (sessionUserId) {
+      rows = await db.select().from(users).where(eq(users.id, sessionUserId)).limit(1);
+    } else {
+      const login = String(parsed.data.email || "").trim().toLowerCase();
+      if (!login || !looksLikeEmail(login)) return res.status(400).json({ message: "Email requis" });
+      rows = await db
+        .select()
+        .from(users)
+        .where(or(sql`lower(trim(${users.email})) = ${login}`, sql`lower(trim(${users.username})) = ${login}`))
+        .limit(1);
+    }
     const u = rows[0] as any;
-    if (!u || u.deletedAt) return res.status(401).json({ message: "Unauthorized" });
+    // Don't leak whether the account exists.
+    if (!u || u.deletedAt) return res.status(400).json({ message: "Code invalide" });
     if (u.emailVerified) return res.json({ ok: true, alreadyVerified: true, user: safeUser(u) });
 
     const stored = String(u.emailVerificationCode || "").replace(/\D/g, "").slice(0, 6);
@@ -1057,9 +1075,9 @@ export async function registerRoutes(
     await db
       .update(users)
       .set({ emailVerified: true, emailVerificationCode: null, emailVerificationToken: null, emailVerificationSentAt: null })
-      .where(eq(users.id, userId));
+      .where(eq(users.id, u.id));
 
-    const updated = await storage.getUser(userId);
+    const updated = await storage.getUser(String(u.id));
     return res.json({ ok: true, user: safeUser(updated) });
   }));
 

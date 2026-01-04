@@ -39,8 +39,8 @@ export async function resendEmailVerification(): Promise<{ ok: boolean; alreadyV
   return res.data as any;
 }
 
-export async function verifyEmailCode(code: string): Promise<{ ok: boolean; alreadyVerified?: boolean; user?: AuthUser }> {
-  const res = await api.post('/api/auth/verify-email-code', { code });
+export async function verifyEmailCode(code: string, email?: string): Promise<{ ok: boolean; alreadyVerified?: boolean; user?: AuthUser }> {
+  const res = await api.post('/api/auth/verify-email-code', { code, email: email ? String(email).trim() : undefined });
   return res.data as any;
 }
 
