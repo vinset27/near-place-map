@@ -10,6 +10,17 @@ export const db = pool ? drizzle(pool) : null;
 export async function ensureAppTables() {
   if (!pool) return;
 
+  // Sessions table for connect-pg-simple (we manage creation ourselves).
+  // Avoids connect-pg-simple reading its internal table.sql (not bundled in dist on some hosts).
+  await pool.query(`
+    create table if not exists session (
+      sid varchar not null primary key,
+      sess json not null,
+      expire timestamptz not null
+    );
+  `);
+  await pool.query(`create index if not exists session_expire_idx on session (expire);`);
+
   // Users table (auth) - some DBs already have it; keep it defensive.
   await pool.query(`
     create table if not exists users (

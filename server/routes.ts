@@ -355,7 +355,9 @@ export async function registerRoutes(
       ? new PgSession({
           pool: pool as any,
           tableName: "session",
-          createTableIfMissing: true,
+          // IMPORTANT: our server build bundles to dist/ and does not ship connect-pg-simple's table.sql.
+          // We create the `session` table ourselves in ensureAppTables() to avoid ENOENT in production.
+          createTableIfMissing: false,
         })
       : new MemoryStore({ checkPeriod: 1000 * 60 * 60 });
 
