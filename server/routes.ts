@@ -1104,8 +1104,9 @@ export async function registerRoutes(
     return res.json(body);
   });
 
-  // Establishment: publish a place directly to the map (requires logged-in establishment profile)
-  app.post("/api/establishments", requireAuth, requireEstablishment, async (req, res) => {
+  // Create a place suggestion (pending). Admin must approve before it becomes public on the map.
+  // Any authenticated + verified user can submit.
+  app.post("/api/establishments", requireAuth, requireVerifiedEmail, async (req, res) => {
     if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
     const userId = req.session.userId!;
 
