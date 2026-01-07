@@ -80,12 +80,14 @@ function isUuidLike(s: string): boolean {
 }
 
 function requireAuth(req: any, res: any, next: any) {
+  tryAttachAuthFromHeader(req);
   if (!req.session?.userId) return res.status(401).json({ message: "Unauthorized" });
   next();
 }
 
 const requireVerifiedEmail = asyncHandler(async (req: any, res: any, next: any) => {
   if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+  tryAttachAuthFromHeader(req);
   const userId = req.session?.userId;
   if (!userId) return res.status(401).json({ message: "Unauthorized" });
   const rows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
@@ -100,6 +102,7 @@ const requireVerifiedEmail = asyncHandler(async (req: any, res: any, next: any) 
 
 async function requireEstablishment(req: any, res: any, next: any) {
   if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+  tryAttachAuthFromHeader(req);
   const userId = req.session?.userId;
   if (!userId) return res.status(401).json({ message: "Unauthorized" });
   const rows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
@@ -118,6 +121,7 @@ async function requireEstablishment(req: any, res: any, next: any) {
 
 const requireAdmin = asyncHandler(async (req: any, res: any, next: any) => {
   // Option A: session user with role=admin (admin profile)
+  tryAttachAuthFromHeader(req);
   if (db && req.session?.userId) {
     const userId = String(req.session.userId);
     const rows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
@@ -154,6 +158,74 @@ function safeUser(u: any) {
 
 function makeToken(bytes = 24): string {
   return crypto.randomBytes(bytes).toString("hex");
+}
+
+function b64UrlEncode(input: Buffer | string): string {
+  const buf = typeof input === "string" ? Buffer.from(input, "utf8") : input;
+  return buf
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function b64UrlDecodeToString(input: string): string {
+  const s = String(input || "")
+    .trim()
+    .replace(/-/g, "+")
+    .replace(/_/g, "/");
+  const pad = s.length % 4 === 0 ? "" : "=".repeat(4 - (s.length % 4));
+  return Buffer.from(s + pad, "base64").toString("utf8");
+}
+
+function getAuthTokenSecret(): string {
+  return String(process.env.AUTH_TOKEN_SECRET || process.env.SESSION_SECRET || "dev-session-secret");
+}
+
+function signAuthToken(payload: { u: string; iat: number; exp: number }): string {
+  const body = b64UrlEncode(JSON.stringify(payload));
+  const sig = b64UrlEncode(crypto.createHmac("sha256", getAuthTokenSecret()).update(body).digest());
+  return `${body}.${sig}`;
+}
+
+function verifyAuthToken(token: string): { userId: string } | null {
+  const t = String(token || "").trim();
+  const parts = t.split(".");
+  if (parts.length !== 2) return null;
+  const [body, sig] = parts;
+  if (!body || !sig) return null;
+  const expected = b64UrlEncode(crypto.createHmac("sha256", getAuthTokenSecret()).update(body).digest());
+  // constant-time compare to avoid timing leaks
+  const a = Buffer.from(expected);
+  const b = Buffer.from(String(sig));
+  if (a.length !== b.length) return null;
+  if (!crypto.timingSafeEqual(a, b)) return null;
+  try {
+    const raw = b64UrlDecodeToString(body);
+    const p = JSON.parse(raw || "{}") as any;
+    const userId = String(p?.u || "").trim();
+    const exp = Number(p?.exp || 0);
+    if (!userId) return null;
+    if (!Number.isFinite(exp) || exp <= 0) return null;
+    if (Date.now() / 1000 > exp) return null;
+    return { userId };
+  } catch {
+    return null;
+  }
+}
+
+function tryAttachAuthFromHeader(req: any): string | null {
+  // Already authenticated via session cookie
+  if (req?.session?.userId) return String(req.session.userId);
+  const auth = String(req.header("authorization") || "").trim();
+  const tokenFromBearer = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
+  const token = tokenFromBearer || String(req.header("x-auth-token") || "").trim();
+  if (!token) return null;
+  const v = verifyAuthToken(token);
+  if (!v?.userId) return null;
+  // Hydrate session for compatibility with existing req.session.userId usage.
+  if (req?.session) req.session.userId = v.userId;
+  return v.userId;
 }
 
 function make6DigitCode(): string {
@@ -303,6 +375,15 @@ export async function registerRoutes(
       store: sessionStore as any,
     }),
   );
+
+  // Auth fallback for mobile: hydrate req.session.userId from Authorization bearer token.
+  // This keeps the codebase consistent (existing routes rely on req.session.userId).
+  app.use((req, _res, next) => {
+    if (String(req.path || "").startsWith("/api")) {
+      tryAttachAuthFromHeader(req);
+    }
+    next();
+  });
 
   await ensureAppTables();
 
@@ -1106,6 +1187,7 @@ export async function registerRoutes(
   }));
 
   app.get("/api/auth/me", async (req, res) => {
+    tryAttachAuthFromHeader(req);
     const userId = req.session.userId;
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
     const user = await storage.getUser(userId);
@@ -1173,7 +1255,12 @@ export async function registerRoutes(
     if (!u || u.deletedAt) return res.status(400).json({ message: "Code invalide" });
     // If user verified via email+code (no session), create a session so the app can continue normally.
     if (!usedSession) req.session.userId = u.id;
-    if (u.emailVerified) return res.json({ ok: true, alreadyVerified: true, user: safeUser(u) });
+    const token = signAuthToken({
+      u: String(u.id),
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 14,
+    });
+    if (u.emailVerified) return res.json({ ok: true, alreadyVerified: true, user: safeUser(u), token });
 
     const stored = String(u.emailVerificationCode || "").replace(/\D/g, "").slice(0, 6);
     let sentAtMs =
@@ -1192,7 +1279,7 @@ export async function registerRoutes(
       .where(eq(users.id, u.id));
 
     const updated = await storage.getUser(String(u.id));
-    return res.json({ ok: true, user: safeUser(updated) });
+    return res.json({ ok: true, user: safeUser(updated), token });
   }));
 
   app.post("/api/auth/register", async (req, res) => {
@@ -1264,7 +1351,12 @@ export async function registerRoutes(
     }
     req.session.userId = user.id;
     const updated = await storage.getUser(user.id);
-    return res.status(201).json({ user: safeUser(updated) });
+    const authToken = signAuthToken({
+      u: String(user.id),
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 14,
+    });
+    return res.status(201).json({ user: safeUser(updated), token: authToken });
   });
 
   app.post("/api/auth/login", async (req, res) => {
@@ -1294,7 +1386,12 @@ export async function registerRoutes(
     const ok = await verifyPassword(password, user.password);
     if (!ok) return res.status(401).json({ message: "Invalid credentials" });
     req.session.userId = user.id;
-    return res.json({ user: safeUser(user) });
+    const authToken = signAuthToken({
+      u: String(user.id),
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 14,
+    });
+    return res.json({ user: safeUser(user), token: authToken });
   });
 
   // Password reset (request) - generates a short code and sends it with Resend.
