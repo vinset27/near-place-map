@@ -20,3 +20,6 @@ alter table push_tokens add column if not exists lng double precision;
 create index if not exists push_tokens_lat_lng_idx on push_tokens (lat, lng);
 create index if not exists push_tokens_updated_at_idx on push_tokens (updated_at);
 
+
+
+

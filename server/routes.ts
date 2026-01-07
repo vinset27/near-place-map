@@ -1155,6 +1155,7 @@ export async function registerRoutes(
     if (!/^\d{6}$/.test(code)) return res.status(400).json({ message: "Code invalide" });
 
     const sessionUserId = req.session?.userId ? String(req.session.userId) : "";
+    const usedSession = !!sessionUserId;
     let rows: any[] = [];
     if (sessionUserId) {
       rows = await db.select().from(users).where(eq(users.id, sessionUserId)).limit(1);
@@ -1170,6 +1171,8 @@ export async function registerRoutes(
     const u = rows[0] as any;
     // Don't leak whether the account exists.
     if (!u || u.deletedAt) return res.status(400).json({ message: "Code invalide" });
+    // If user verified via email+code (no session), create a session so the app can continue normally.
+    if (!usedSession) req.session.userId = u.id;
     if (u.emailVerified) return res.json({ ok: true, alreadyVerified: true, user: safeUser(u) });
 
     const stored = String(u.emailVerificationCode || "").replace(/\D/g, "").slice(0, 6);
