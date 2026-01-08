@@ -140,10 +140,8 @@ export interface CreateEstablishmentInput {
 export async function createEstablishment(
   input: CreateEstablishmentInput
 ): Promise<ApiEstablishment> {
-  const response = await api.post<ApiEstablishment>('/api/establishments', input, {
-    withCredentials: true,
-  });
-  return response.data;
+  const response = await api.post<{ establishment: ApiEstablishment }>('/api/establishments', input);
+  return (response.data as any)?.establishment as ApiEstablishment;
 }
 
 /**

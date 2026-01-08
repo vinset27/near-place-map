@@ -6,6 +6,7 @@
 import axios from 'axios';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 function getHostFromExpo(): string | null {
   // SDK 54 (Expo Go / dev): hostUri is usually "192.168.x.x:8081"
@@ -49,6 +50,38 @@ function resolveApiBaseUrl(): string {
 // URL de base de l'API (backend existant)
 export const API_BASE_URL = resolveApiBaseUrl();
 
+const AUTH_TOKEN_KEY = 'nearplace:auth:token:v1';
+let cachedAuthToken: string | null | undefined = undefined; // undefined=unknown, null=cleared
+
+export async function getAuthToken(): Promise<string | null> {
+  if (cachedAuthToken !== undefined) return cachedAuthToken;
+  try {
+    const t = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
+    cachedAuthToken = t ? String(t) : null;
+    return cachedAuthToken;
+  } catch {
+    cachedAuthToken = null;
+    return null;
+  }
+}
+
+export async function setAuthToken(token: string | null): Promise<void> {
+  const t = token ? String(token).trim() : '';
+  cachedAuthToken = t ? t : null;
+  try {
+    if (t) await AsyncStorage.setItem(AUTH_TOKEN_KEY, t);
+    else await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+  } catch {
+    // ignore
+  }
+  if (t) (api.defaults.headers.common as any).Authorization = `Bearer ${t}`;
+  else delete (api.defaults.headers.common as any).Authorization;
+}
+
+export async function clearAuthToken(): Promise<void> {
+  await setAuthToken(null);
+}
+
 function resolveDevFallbackBaseUrl(): string {
   // Opt-in only: if not set, we won't retry/fallback to LAN at all.
   const envFallback = process.env.EXPO_PUBLIC_DEV_FALLBACK_BASE_URL;
@@ -89,18 +122,22 @@ export const api = axios.create({
   },
 });
 
+// Always attach auth token if present (works in prod builds too).
+api.interceptors.request.use(async (config) => {
+  const token = await getAuthToken();
+  if (token) {
+    config.headers = { ...(config.headers || {}), Authorization: `Bearer ${token}` } as any;
+  }
+  if (__DEV__) console.log(`[API] ${config.method?.toUpperCase()} ${config.url}`);
+  return config;
+});
+
 // Intercepteur pour logger les requêtes en dev
 if (__DEV__) {
-  api.interceptors.request.use(
-    (config) => {
-      console.log(`[API] ${config.method?.toUpperCase()} ${config.url}`);
-      return config;
-    },
-    (error) => {
-      console.error('[API] Request error:', error);
-      return Promise.reject(error);
-    }
-  );
+  api.interceptors.request.use(undefined, (error) => {
+    console.error('[API] Request error:', error);
+    return Promise.reject(error);
+  });
 
   api.interceptors.response.use(
     (response) => {

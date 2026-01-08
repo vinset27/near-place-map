@@ -11,6 +11,8 @@ export type ApiUserEvent = {
   startsAt: string;
   endsAt?: string | null;
   description?: string | null;
+  photos?: string[] | null;
+  ageMin?: number | null;
   lat: number;
   lng: number;
   published: boolean;
@@ -43,6 +45,8 @@ export async function createUserEvent(input: {
   startsAt: string;
   endsAt?: string;
   description?: string;
+  photos?: string[];
+  ageMin?: number;
   lat: number;
   lng: number;
 }): Promise<ApiUserEvent> {

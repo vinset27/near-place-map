@@ -43,14 +43,10 @@ export default function RegisterScreen() {
   useEffect(() => {
     if (meLoading) return;
     if (!me) return;
-    if ((me as any)?.emailVerified === false) {
-      router.replace('/verify-email');
-      return;
-    }
     const role = String((me as any)?.role || 'user');
     if (role === 'admin') router.replace('/admin');
-    else if (role === 'establishment') router.replace('/business');
-    else router.replace('/map');
+    else if (role === 'establishment') router.replace('/(app)/business');
+    else router.replace('/(app)/map');
   }, [me, meLoading, router]);
 
   const email = username.trim().toLowerCase();
@@ -88,13 +84,9 @@ export default function RegisterScreen() {
         await AsyncStorage.setItem(KEY_NAMES, JSON.stringify({ firstName: fn, lastName: ln })).catch(() => {});
       }
       const user = await authRegister({ username: email, password });
-      await qc.invalidateQueries({ queryKey: ['auth-me'] });
-      // Force email confirmation step (code) before continuing onboarding.
-      if ((user as any)?.emailVerified === false) {
-        router.replace('/verify-email');
-        return;
-      }
-      router.replace('/post-register');
+      qc.setQueryData(['auth-me'], user as any);
+      // Allow browsing right away; publishing/itinerary are gated elsewhere if email isn't verified.
+      router.replace('/(app)/map');
     } catch (e: any) {
       setError(String(e?.response?.data?.message || e?.message || 'Erreur'));
     } finally {

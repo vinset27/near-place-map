@@ -228,6 +228,8 @@ export async function ensureAppTables() {
       starts_at timestamptz not null,
       ends_at timestamptz,
       description text,
+      photos text[],
+      age_min integer,
       lat double precision not null,
       lng double precision not null,
       moderation_status text not null default 'pending',
@@ -238,6 +240,8 @@ export async function ensureAppTables() {
   `);
   await pool.query(`alter table user_events add column if not exists moderation_status text not null default 'pending';`);
   await pool.query(`alter table user_events add column if not exists moderation_reason text;`);
+  await pool.query(`alter table user_events add column if not exists photos text[];`);
+  await pool.query(`alter table user_events add column if not exists age_min integer;`);
   await pool.query(`alter table user_events add column if not exists moderated_at timestamptz;`);
   // Ensure moderation default even if table existed before.
   await pool.query(`alter table user_events alter column published set default false;`);

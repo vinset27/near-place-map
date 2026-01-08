@@ -13,8 +13,9 @@ const HERO_IMAGE = require('../../assets/119589243_10178365.jpg');
 
 export default function VerifyEmailScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ next?: string }>();
+  const params = useLocalSearchParams<{ next?: string; email?: string }>();
   const next = String(params.next || '').trim();
+  const emailFromParams = String(params.email || '').trim();
   const qc = useQueryClient();
   const t = useAppTheme();
   const tint = usePrimaryTints();
@@ -43,9 +44,13 @@ export default function VerifyEmailScreen() {
   useEffect(() => {
     if (meLoading) return;
     // If not authed, allow verifying with (email + code) on this same screen.
-    if (!isAuthed) return;
-    setEmail(String((me as any)?.email || (me as any)?.username || ''));
-  }, [isAuthed, meLoading, router]);
+    if (isAuthed) {
+      setEmail(String((me as any)?.email || (me as any)?.username || ''));
+      return;
+    }
+    // Prefill email when coming from register/login even if session cookie isn't present.
+    if (emailFromParams) setEmail(emailFromParams);
+  }, [emailFromParams, isAuthed, me, meLoading]);
 
   useEffect(() => {
     if (!isEmailVerified) return;
@@ -73,11 +78,30 @@ export default function VerifyEmailScreen() {
     setLoading(true);
     try {
       const mail = isAuthed ? String((me as any)?.email || (me as any)?.username || '') : String(email || '');
-      await verifyEmailCode(c, mail);
-      await qc.invalidateQueries({ queryKey: ['auth-me'] });
+      if (!isAuthed && !String(mail || '').includes('@')) {
+        setToast('Email requis');
+        return;
+      }
+      const out = await verifyEmailCode(c, mail);
+      // Ensure UI updates immediately even if cookies/session propagation is delayed.
+      if ((out as any)?.user) {
+        qc.setQueryData(['auth-me'], (out as any).user);
+      } else {
+        await qc.invalidateQueries({ queryKey: ['auth-me'] });
+      }
       setToast('Email confirmé ✅');
       setCode('');
-      // Redirect happens via effect once auth-me shows emailVerified true.
+      // Redirect immediately (avoid being stuck if /api/auth/me is 401 due to cookie issues).
+      const u: any = (out as any)?.user || null;
+      if (next) {
+        router.replace(next as any);
+      } else if (u?.role === 'admin') {
+        router.replace('/admin');
+      } else if (u?.role === 'establishment') {
+        router.replace('/(app)/business');
+      } else {
+        router.replace('/(app)/map');
+      }
     } catch (e: any) {
       setToast(String(e?.response?.data?.message || e?.message || 'Erreur'));
     } finally {

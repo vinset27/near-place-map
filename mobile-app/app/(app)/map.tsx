@@ -21,7 +21,7 @@ import {
 import MapView, { Marker, PROVIDER_GOOGLE, Region } from 'react-native-maps';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { fetchEstablishmentsNearby, toUiEstablishment, submitBusinessApplication } from '../../services/establishments';
+import { createEstablishment, fetchEstablishmentsNearby, toUiEstablishment } from '../../services/establishments';
 import { getCurrentLocation, watchLocation } from '../../services/location';
 import { useLocationStore, useCurrentLocation } from '../../stores/useLocationStore';
 import { ESTABLISHMENT_CATEGORIES } from '../../types/establishment';
@@ -114,6 +114,20 @@ export default function MapScreen() {
   }, [me, userLocation?.lat, userLocation?.lng]);
   const isEstablishment = !!me && (me as any)?.role === 'establishment' && !!(me as any)?.profileCompleted;
   const isAuthed = !!me;
+  const isEmailVerified = !!me && (me as any)?.emailVerified !== false;
+
+  const goNavigationGuarded = (params: Record<string, any>) => {
+    if (!isAuthed) {
+      router.push('/login');
+      return;
+    }
+    if (!isEmailVerified) {
+      const mail = String((me as any)?.email || (me as any)?.username || '').trim();
+      router.push({ pathname: '/verify-email', params: { email: mail, next: '/(app)/map' } } as any);
+      return;
+    }
+    router.push({ pathname: '/navigation', params } as any);
+  };
 
   const toggleFavoriteGuarded = async (est: any) => {
     if (!isAuthed) {
@@ -462,7 +476,7 @@ export default function MapScreen() {
           const c = e.nativeEvent.coordinate;
           setDraft((d) => ({ ...d, lat: c.latitude, lng: c.longitude }));
         }}
-        // Google Maps POIs (Android): allow itinerary even for places not in our DB.
+        // Google Maps POIs (Android): allow itinerary even for places not in our DB (but requires verified email).
         // @ts-ignore - onPoiClick exists on Google provider but may not be in typings.
         onPoiClick={(e: any) => {
           try {
@@ -473,16 +487,13 @@ export default function MapScreen() {
             setSelectedUserEventId(null);
             setPanelOpen(false);
             Keyboard.dismiss();
-            router.push({
-              pathname: '/navigation',
-              params: {
-                mode: 'driving',
-                lat: String(c.latitude),
-                lng: String(c.longitude),
-                name,
-                category: 'other',
-              },
-            } as any);
+            goNavigationGuarded({
+              mode: 'driving',
+              lat: String(c.latitude),
+              lng: String(c.longitude),
+              name,
+              category: 'other',
+            });
           } catch {}
         }}
       >
@@ -905,20 +916,17 @@ export default function MapScreen() {
               <TouchableOpacity
                 style={styles.mapCtaPrimary}
                 onPress={() =>
-                  router.push({
-                    pathname: '/navigation',
-                    params: {
-                      id: selectedEstablishment.id,
-                      mode: 'driving',
-                      lat: String(selectedEstablishment.coordinates.lat),
-                      lng: String(selectedEstablishment.coordinates.lng),
-                      name: selectedEstablishment.name,
-                      category: selectedEstablishment.category,
-                      address: selectedEstablishment.address || '',
-                      commune: selectedEstablishment.commune || '',
-                      cover: selectedEstablishment.imageUrl || '',
-                    },
-                  } as any)
+                  goNavigationGuarded({
+                    id: selectedEstablishment.id,
+                    mode: 'driving',
+                    lat: String(selectedEstablishment.coordinates.lat),
+                    lng: String(selectedEstablishment.coordinates.lng),
+                    name: selectedEstablishment.name,
+                    category: selectedEstablishment.category,
+                    address: selectedEstablishment.address || '',
+                    commune: selectedEstablishment.commune || '',
+                    cover: selectedEstablishment.imageUrl || '',
+                  })
                 }
               >
                 <Text style={styles.mapCtaPrimaryText}>Itinéraire</Text>
@@ -945,6 +953,27 @@ export default function MapScreen() {
               {(selectedUserEvent as any)?.organizer?.name ? `Par ${(selectedUserEvent as any).organizer.name} • ` : ''}
               {new Date((selectedUserEvent as any).startsAt).toLocaleString()}
             </Text>
+
+            {!!(selectedUserEvent as any)?.ageMin && (
+              <View style={{ marginTop: 8, alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: t.border, backgroundColor: t.input }}>
+                <Text style={{ color: t.text, fontWeight: '950', fontSize: 12 }}>Âge requis: {String((selectedUserEvent as any).ageMin)}+</Text>
+              </View>
+            )}
+
+            {!!String((selectedUserEvent as any)?.description || '').trim() && (
+              <Text style={{ marginTop: 10, color: t.text, fontWeight: '750' }} numberOfLines={3}>
+                {String((selectedUserEvent as any).description)}
+              </Text>
+            )}
+
+            {Array.isArray((selectedUserEvent as any)?.photos) && (selectedUserEvent as any).photos.length > 0 && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingTop: 10 }}>
+                {(selectedUserEvent as any).photos.slice(0, 6).map((u: string) => (
+                  <Image key={u} source={{ uri: u }} style={{ width: 92, height: 92, borderRadius: 18, backgroundColor: '#111827' }} />
+                ))}
+              </ScrollView>
+            )}
+
             <View style={styles.mapCtas}>
               <TouchableOpacity
                 style={[styles.mapCtaGhost, { backgroundColor: t.input, borderColor: t.border }]}
@@ -967,16 +996,13 @@ export default function MapScreen() {
               <TouchableOpacity
                 style={[styles.mapCtaPrimary, { backgroundColor: t.primary }]}
                 onPress={() =>
-                  router.push({
-                    pathname: '/navigation',
-                    params: {
-                      mode: 'driving',
-                      lat: String((selectedUserEvent as any).lat),
-                      lng: String((selectedUserEvent as any).lng),
-                      name: String((selectedUserEvent as any)?.title || 'Soirée'),
-                      category: 'event',
-                    },
-                  } as any)
+                  goNavigationGuarded({
+                    mode: 'driving',
+                    lat: String((selectedUserEvent as any).lat),
+                    lng: String((selectedUserEvent as any).lng),
+                    name: String((selectedUserEvent as any)?.title || 'Soirée'),
+                    category: 'event',
+                  })
                 }
               >
                 <Text style={[styles.mapCtaPrimaryText, { color: '#fff' }]}>Itinéraire</Text>
@@ -1025,16 +1051,13 @@ export default function MapScreen() {
               <TouchableOpacity
                 style={[styles.mapCtaPrimary, { backgroundColor: '#8b5cf6' }]}
                 onPress={() =>
-                  router.push({
-                    pathname: '/navigation',
-                    params: {
-                      mode: 'driving',
-                      lat: String((selectedProEvent as any).lat),
-                      lng: String((selectedProEvent as any).lng),
-                      name: String((selectedProEvent as any)?.title || 'Événement'),
-                      category: 'event',
-                    },
-                  } as any)
+                  goNavigationGuarded({
+                    mode: 'driving',
+                    lat: String((selectedProEvent as any).lat),
+                    lng: String((selectedProEvent as any).lng),
+                    name: String((selectedProEvent as any)?.title || 'Événement'),
+                    category: 'event',
+                  })
                 }
               >
                 <Text style={[styles.mapCtaPrimaryText, { color: '#fff' }]}>Itinéraire</Text>
@@ -1221,7 +1244,7 @@ export default function MapScreen() {
                     uploadedUrls.push(presign.publicUrl);
                   }
 
-                  const res = await submitBusinessApplication({
+                  const est = await createEstablishment({
                     name: draft.name.trim(),
                     category: draft.category,
                     phone: draft.phone.trim() || 'N/A',
@@ -1232,7 +1255,7 @@ export default function MapScreen() {
                     lat: draft.lat,
                     lng: draft.lng,
                   });
-                  setSubmittedId(res.id);
+                  setSubmittedId(String((est as any)?.id || ''));
                   // No map refresh needed: it will appear only after admin approval (like web).
                 } catch (e: any) {
                   setCreateError(String(e?.response?.data?.message || e?.message || 'Erreur réseau'));

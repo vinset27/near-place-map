@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -91,6 +91,11 @@ export default function MyUserEventsScreen() {
           contentContainerStyle={{ padding: 16, paddingBottom: 24, gap: 10 }}
           renderItem={({ item }: any) => (
             <View style={[styles.row, { backgroundColor: t.card, borderColor: t.border }]}>
+              {Array.isArray(item.photos) && item.photos[0] ? (
+                <Image source={{ uri: String(item.photos[0]) }} style={styles.cover} />
+              ) : (
+                <View style={[styles.cover, { backgroundColor: t.input, borderColor: t.border, borderWidth: 1 }]} />
+              )}
               <View style={{ flex: 1 }}>
                 <Text style={{ color: t.text, fontWeight: '950' }} numberOfLines={1}>
                   {String(item.title)}
@@ -98,6 +103,11 @@ export default function MyUserEventsScreen() {
                 <Text style={{ color: t.muted, fontWeight: '800', marginTop: 4 }} numberOfLines={2}>
                   {String(item.kind) === 'meet' ? 'Point de rencontre' : 'Soirée'} • {new Date(item.startsAt).toLocaleString()}
                 </Text>
+                {!!item.ageMin && (
+                  <Text style={{ color: t.muted, fontWeight: '850', marginTop: 4 }} numberOfLines={1}>
+                    Âge requis: {String(item.ageMin)}+
+                  </Text>
+                )}
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}>
                   {String(item.moderationStatus || '').toLowerCase() === 'rejected' && (
                     <View style={[styles.statusPill, { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.26)' }]}>
@@ -166,6 +176,7 @@ const styles = StyleSheet.create({
   bigBtn: { borderRadius: 16, paddingVertical: 14, alignItems: 'center' },
   bigBtnText: { color: '#fff', fontWeight: '950' },
   row: { borderRadius: 18, borderWidth: 1, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  cover: { width: 64, height: 64, borderRadius: 18, backgroundColor: '#111827' },
   delBtn: { width: 42, height: 42, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   statusPill: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, borderWidth: 1 },
 });

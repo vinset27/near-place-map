@@ -22,7 +22,7 @@ import { db, ensureAppTables } from "./db";
 import { pool } from "./db";
 import { and, desc, eq, gte, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { presignBusinessPhotoPut, presignEventMediaGet, presignEventMediaPut } from "./r2";
+import { presignBusinessPhotoPut, presignEventMediaGet, presignEventMediaPut, presignUserEventMediaPut } from "./r2";
 import { googlePlacesNearbyAll, mapGoogleTypesToCategory } from "./googlePlaces";
 import { resendSendEmail } from "./resend";
 import { sendExpoPush } from "./push";
@@ -741,8 +741,31 @@ export async function registerRoutes(
       });
     }
 
-    return res.json(out);
+    // Backward/forward compatibility: older clients expect { url }, newer clients expect { putUrl }.
+    // Also always provide a usable publicUrl: prefer R2_PUBLIC_BASE_URL, else provide an API redirect
+    // that resolves to a signed GET URL.
+    const proto = String((req.headers["x-forwarded-proto"] as any) || req.protocol || "https");
+    const host = String((req.headers["x-forwarded-host"] as any) || req.get("host") || "");
+    const base = host ? `${proto}://${host}` : "";
+    const fallbackPublic = out.key ? `${base}/api/business/photos/public/${encodeURIComponent(out.key)}` : null;
+    return res.json({
+      key: out.key,
+      url: out.url,
+      putUrl: out.url,
+      publicUrl: out.publicUrl || fallbackPublic || null,
+    });
   });
+
+  // Public: resolve a business media key to a public URL (prefer real publicBaseUrl, else signed GET redirect).
+  app.get("/api/business/photos/public/:key", asyncHandler(async (req, res) => {
+    const key = String(req.params.key || "").trim();
+    if (!key || key.length > 500) return res.status(400).send("bad key");
+    if (!key.startsWith("business/")) return res.status(400).send("bad key");
+    const out = await presignEventMediaGet({ key });
+    if (!out) return res.status(503).send("R2 not configured");
+    const target = out.publicUrl || out.url;
+    return res.redirect(302, target);
+  }));
 
   // Pro: presign event media upload (photos/videos) to R2
   app.post("/api/events/media/presign", requireAuth, requireEstablishment, asyncHandler(async (req, res) => {
@@ -762,6 +785,36 @@ export async function registerRoutes(
     const base = host ? `${proto}://${host}` : "";
     const fallbackPublic = out.key ? `${base}/api/events/media/public/${encodeURIComponent(out.key)}` : null;
     return res.json({ putUrl: out.url, publicUrl: out.publicUrl || fallbackPublic || null, key: out.key });
+  }));
+
+  // User events: presign user-event photos to R2 (authenticated + verified users)
+  app.post("/api/user-events/media/presign", requireAuth, requireVerifiedEmail, asyncHandler(async (req, res) => {
+    const parsed = z
+      .object({
+        fileName: z.string().min(1).max(180),
+        contentType: z.string().min(3).max(120),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+    const userId = String(req.session.userId || "");
+    const out = await presignUserEventMediaPut({ ...parsed.data, userId });
+    if (!out || !out.url) return res.status(503).json({ message: "R2 not configured" });
+    const proto = String((req.headers["x-forwarded-proto"] as any) || req.protocol || "https");
+    const host = String((req.headers["x-forwarded-host"] as any) || req.get("host") || "");
+    const base = host ? `${proto}://${host}` : "";
+    const fallbackPublic = out.key ? `${base}/api/user-events/media/public/${encodeURIComponent(out.key)}` : null;
+    return res.json({ putUrl: out.url, publicUrl: out.publicUrl || fallbackPublic || null, key: out.key });
+  }));
+
+  // Public: resolve a user-event media key to a public URL (prefer real publicBaseUrl, else signed GET redirect).
+  app.get("/api/user-events/media/public/:key", asyncHandler(async (req, res) => {
+    const key = String(req.params.key || "").trim();
+    if (!key || key.length > 500) return res.status(400).send("bad key");
+    if (!key.startsWith("user-events/")) return res.status(400).send("bad key");
+    const out = await presignEventMediaGet({ key });
+    if (!out) return res.status(503).send("R2 not configured");
+    const target = out.publicUrl || out.url;
+    return res.redirect(302, target);
   }));
 
   // Public: resolve an event media key to a public URL (prefer real publicBaseUrl, else signed GET redirect).
@@ -2106,6 +2159,8 @@ export async function registerRoutes(
         startsAt: z.string().datetime(),
         endsAt: z.string().datetime().optional(),
         description: z.string().max(800).optional(),
+        photos: z.array(z.string().url()).max(6).optional(),
+        ageMin: z.number().int().min(0).max(99).optional(),
         lat: z.number(),
         lng: z.number(),
       })
@@ -2120,6 +2175,8 @@ export async function registerRoutes(
         startsAt: new Date(parsed.data.startsAt),
         endsAt: parsed.data.endsAt ? new Date(parsed.data.endsAt) : null,
         description: parsed.data.description ?? null,
+        photos: parsed.data.photos?.length ? parsed.data.photos : null,
+        ageMin: typeof parsed.data.ageMin === "number" ? parsed.data.ageMin : null,
         lat: parsed.data.lat,
         lng: parsed.data.lng,
         moderationStatus: "pending",

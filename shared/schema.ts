@@ -7,6 +7,7 @@ import {
   timestamp,
   uuid,
   doublePrecision,
+  integer,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -128,6 +129,8 @@ export const userEvents = pgTable("user_events", {
   startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
   endsAt: timestamp("ends_at", { withTimezone: true }),
   description: text("description"),
+  photos: text("photos").array(),
+  ageMin: integer("age_min"),
   lat: doublePrecision("lat").notNull(),
   lng: doublePrecision("lng").notNull(),
   moderationStatus: text("moderation_status").notNull().default("pending"),

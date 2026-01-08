@@ -1,4 +1,4 @@
-import api from './api';
+import api, { clearAuthToken, setAuthToken } from './api';
 
 export type AuthUser = {
   id: string;
@@ -22,16 +22,21 @@ export async function authMe(): Promise<AuthUser | null> {
 
 export async function authRegister(params: { username: string; password: string }): Promise<AuthUser> {
   const res = await api.post('/api/auth/register', params);
+  const token = (res.data as any)?.token ? String((res.data as any).token) : '';
+  if (token) await setAuthToken(token);
   return res.data.user as AuthUser;
 }
 
 export async function authLogin(params: { username: string; password: string }): Promise<AuthUser> {
   const res = await api.post('/api/auth/login', params);
+  const token = (res.data as any)?.token ? String((res.data as any).token) : '';
+  if (token) await setAuthToken(token);
   return res.data.user as AuthUser;
 }
 
 export async function authLogout(): Promise<void> {
-  await api.post('/api/auth/logout');
+  await api.post('/api/auth/logout').catch(() => {});
+  await clearAuthToken();
 }
 
 export async function resendEmailVerification(email?: string): Promise<{ ok: boolean; alreadyVerified?: boolean }> {
@@ -41,6 +46,8 @@ export async function resendEmailVerification(email?: string): Promise<{ ok: boo
 
 export async function verifyEmailCode(code: string, email?: string): Promise<{ ok: boolean; alreadyVerified?: boolean; user?: AuthUser }> {
   const res = await api.post('/api/auth/verify-email-code', { code, email: email ? String(email).trim() : undefined });
+  const token = (res.data as any)?.token ? String((res.data as any).token) : '';
+  if (token) await setAuthToken(token);
   return res.data as any;
 }
 
@@ -71,6 +78,7 @@ export async function confirmPasswordChange(params: { code: string; newPassword:
 
 export async function deleteAccount(): Promise<{ ok: boolean; already?: boolean }> {
   const res = await api.post('/api/auth/delete-account', { confirm: 'DELETE' });
+  if ((res.data as any)?.ok) await clearAuthToken();
   return res.data as any;
 }
 

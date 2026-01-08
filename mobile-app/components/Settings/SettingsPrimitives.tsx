@@ -8,17 +8,26 @@ export function SettingsScreenShell({
   title,
   children,
   right,
+  onBack,
 }: {
   title: string;
   children: React.ReactNode;
   right?: React.ReactNode;
+  onBack?: () => void;
 }) {
   const router = useRouter();
   const t = useAppTheme();
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: t.bg }]}>
       <View style={[styles.header, { borderBottomColor: t.border, backgroundColor: t.card }]}>
-        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { backgroundColor: t.input, borderColor: t.border }]}>
+        <TouchableOpacity
+          onPress={() => {
+            if (onBack) return onBack();
+            if ((router as any)?.canGoBack?.()) return router.back();
+            return router.replace('/(app)/map');
+          }}
+          style={[styles.backBtn, { backgroundColor: t.input, borderColor: t.border }]}
+        >
           <Text style={[styles.backText, { color: t.text }]}>←</Text>
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: t.text, transform: [{ scale: t.textScale }] }]} numberOfLines={1}>

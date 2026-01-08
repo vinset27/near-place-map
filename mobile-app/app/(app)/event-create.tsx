@@ -15,7 +15,7 @@ import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
 import { uploadEventMedia } from '../../services/eventMedia';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 function presetIso(kind: '2h' | 'tonight' | 'tomorrow'): string {
   const now = new Date();
@@ -92,7 +92,7 @@ export default function EventCreateScreen() {
       });
       await qc.invalidateQueries({ queryKey: ['pro-my-events'] });
       Alert.alert('En attente', 'Ton événement est en attente de validation admin avant publication.', [{ text: 'OK' }]);
-      router.replace('/business-dashboard');
+      router.replace('/(app)/business');
     } finally {
       setSaving(false);
     }

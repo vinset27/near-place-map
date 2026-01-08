@@ -32,14 +32,10 @@ export default function LoginScreen() {
   useEffect(() => {
     if (meLoading) return;
     if (!me) return;
-    if ((me as any)?.emailVerified === false) {
-      router.replace('/verify-email');
-      return;
-    }
     const role = String((me as any)?.role || 'user');
     if (role === 'admin') router.replace('/admin');
-    else if (role === 'establishment') router.replace('/business');
-    else router.replace('/map');
+    else if (role === 'establishment') router.replace('/(app)/business');
+    else router.replace('/(app)/map');
   }, [me, meLoading, router]);
 
   const submit = async () => {
@@ -47,19 +43,16 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       const user = await authLogin({ username: username.trim(), password });
-      await qc.invalidateQueries({ queryKey: ['auth-me'] });
-      if ((user as any)?.emailVerified === false) {
-        router.replace('/verify-email');
-        return;
-      }
+      // Make auth state immediate (avoid relying on /api/auth/me right after login).
+      qc.setQueryData(['auth-me'], user as any);
       // Route depending on role (avoid confusing users that are not "establishment").
       const role = String((user as any)?.role || 'user');
       if (role === 'admin') {
         router.replace('/admin');
         return;
       }
-      if (role === 'establishment') router.replace('/business');
-      else router.replace('/map');
+      if (role === 'establishment') router.replace('/(app)/business');
+      else router.replace('/(app)/map');
     } catch (e: any) {
       setError(String(e?.response?.data?.message || e?.message || 'Erreur'));
     } finally {

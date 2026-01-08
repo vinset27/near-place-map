@@ -10,6 +10,7 @@ import MapView, { Marker, Polyline, Region } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { authMe } from '../services/auth';
 import { fetchEstablishmentById, toUiEstablishment } from '../services/establishments';
 import { TravelMode } from '../services/directions';
 import { fetchGoogleDirections } from '../services/directions';
@@ -71,6 +72,14 @@ export default function NavigationScreen() {
   const id = params.id ? String(params.id) : '';
   const initialMode = (params.mode as TravelMode) || 'driving';
   const qc = useQueryClient();
+  const { data: me, isLoading: meLoading } = useQuery({
+    queryKey: ['auth-me'],
+    queryFn: () => authMe(),
+    staleTime: 1000 * 20,
+    retry: false,
+  });
+  const isAuthed = !!me;
+  const isEmailVerified = !!me && (me as any)?.emailVerified !== false;
 
   const userLocation = useCurrentLocation();
   const { hasPermission, setUserLocation, setIsTracking } = useLocationStore();
@@ -86,17 +95,41 @@ export default function NavigationScreen() {
   const [autoHideGuide, setAutoHideGuide] = useState(true);
   const didSaveTripRef = useRef(false);
 
-  // If not logged in, warn that the trip won't be saved.
-  useEffect(() => {
-    const me = qc.getQueryData(['auth-me']) as any;
-    if (me) return;
-    setNearbyHint({
-      title: 'Trajet non enregistré',
-      subtitle: "Connecte-toi pour enregistrer tes trajets dans ton dashboard.",
-    });
-    const id = setTimeout(() => setNearbyHint(null), 7000);
-    return () => clearTimeout(id);
-  }, [qc]);
+  // Rule: itinerary requires verified email (user can browse the app without verification).
+  if (!meLoading && (!isAuthed || !isEmailVerified)) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#000' }}>
+        <View style={{ flex: 1, padding: 20, justifyContent: 'center' }}>
+          <Text style={{ color: '#fff', fontSize: 20, fontWeight: '900' }}>Itinéraire indisponible</Text>
+          <Text style={{ color: 'rgba(255,255,255,0.8)', marginTop: 10, fontSize: 14, lineHeight: 20 }}>
+            {!isAuthed
+              ? "Connecte-toi pour tracer un itinéraire."
+              : "Confirme ton email pour tracer un itinéraire (publication + navigation)."}
+          </Text>
+          <TouchableOpacity
+            onPress={() => {
+              if (!isAuthed) router.replace('/login');
+              else {
+                const mail = String((me as any)?.email || (me as any)?.username || '').trim();
+                router.replace({ pathname: '/verify-email', params: { email: mail, next: '/(app)/map' } } as any);
+              }
+            }}
+            style={{ marginTop: 18, backgroundColor: '#2563eb', paddingVertical: 12, borderRadius: 12, alignItems: 'center' }}
+            activeOpacity={0.9}
+          >
+            <Text style={{ color: '#fff', fontWeight: '800' }}>{!isAuthed ? 'Se connecter' : 'Confirmer mon email'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => router.replace('/(app)/map')}
+            style={{ marginTop: 10, paddingVertical: 10, borderRadius: 12, alignItems: 'center' }}
+            activeOpacity={0.9}
+          >
+            <Text style={{ color: 'rgba(255,255,255,0.85)', fontWeight: '700', textDecorationLine: 'underline' }}>Retour à la carte</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   // Signal backend once: used to notify establishment owner ("someone started an itinerary to you").
   useEffect(() => {

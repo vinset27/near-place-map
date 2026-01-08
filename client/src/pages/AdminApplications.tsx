@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ArrowLeft, CheckCircle2, LocateFixed, MapPin, RefreshCw } from "lucide-react";
 import { useLocation } from "wouter";
 import LocationPickerDialog from "@/components/LocationPickerDialog";
-import { apiUrl } from "@/lib/apiBase";
+import { apiUrl, getApiBase } from "@/lib/apiBase";
 
 type Application = {
   id: string;
@@ -23,6 +23,63 @@ type Application = {
   lng?: number | null;
 };
 
+type PendingEstablishment = {
+  id: string;
+  createdAt: string;
+  name: string;
+  category: string;
+  phone?: string | null;
+  description?: string | null;
+  photos?: string[] | null;
+  address?: string | null;
+  commune?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  owner?: { userId: string; name: string };
+};
+
+type PendingEvent = {
+  id: string;
+  createdAt: string;
+  title: string;
+  category?: string;
+  description?: string | null;
+  startsAt: string;
+  endsAt?: string | null;
+  coverUrl?: string | null;
+  photos?: string[] | null;
+  establishment?: {
+    id: string;
+    name: string;
+    category?: string;
+    commune?: string | null;
+    address?: string | null;
+  } | null;
+  organizer: { userId: string; name: string; avatarUrl?: string | null };
+};
+
+type PendingUserEvent = {
+  id: string;
+  createdAt: string;
+  kind: string;
+  title: string;
+  description?: string | null;
+  startsAt: string;
+  endsAt?: string | null;
+  photos?: string[] | null;
+  ageMin?: number | null;
+  lat?: number | null;
+  lng?: number | null;
+  organizer: { userId: string; name: string };
+};
+
+function formatDateTime(value?: string | null) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
+}
+
 export default function AdminApplications() {
   const [, setLocation] = useLocation();
   const [token, setToken] = useState<string>(() => localStorage.getItem("admin_token") || "");
@@ -32,6 +89,9 @@ export default function AdminApplications() {
     return "all";
   });
   const [apps, setApps] = useState<Application[]>([]);
+  const [pendingEstablishments, setPendingEstablishments] = useState<PendingEstablishment[]>([]);
+  const [pendingEvents, setPendingEvents] = useState<PendingEvent[]>([]);
+  const [pendingUserEvents, setPendingUserEvents] = useState<PendingUserEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [importMsg, setImportMsg] = useState<string | null>(null);
@@ -43,7 +103,9 @@ export default function AdminApplications() {
   );
   const [pickerForId, setPickerForId] = useState<string | null>(null);
 
-  const canLoad = useMemo(() => token.trim().length > 0, [token]);
+  const hasToken = useMemo(() => token.trim().length > 0, [token]);
+  const apiBase = useMemo(() => getApiBase() || "", []);
+  const headers = useMemo(() => (hasToken ? { "x-admin-token": token.trim() } : undefined), [hasToken, token]);
 
   const [importLat, setImportLat] = useState<string>("5.3261");
   const [importLng, setImportLng] = useState<string>("-4.0200");
@@ -71,30 +133,43 @@ export default function AdminApplications() {
   };
 
   async function load() {
-    if (!canLoad) return;
     setLoading(true);
     setError(null);
     try {
       const res = await fetch(apiUrl(`/api/admin/business/applications?status=${status}`), {
-        headers: { "x-admin-token": token.trim() },
+        headers,
       });
       const text = await res.text();
       if (!res.ok) throw new Error(text);
       const data = JSON.parse(text);
       setApps(data.applications || []);
+
+      // Unified moderation (mobile app submissions create rows in `establishments` directly).
+      const res2 = await fetch(apiUrl(`/api/admin/moderation/pending?limit=500`), {
+        headers,
+      });
+      const text2 = await res2.text();
+      if (!res2.ok) throw new Error(text2);
+      const data2 = JSON.parse(text2);
+      const pending = (data2 as any)?.pending || {};
+      setPendingEstablishments(pending.establishments || []);
+      setPendingEvents(pending.events || []);
+      setPendingUserEvents(pending.userEvents || []);
     } catch (e: any) {
       setError(e?.message || "Erreur");
       setApps([]);
+      setPendingEstablishments([]);
+      setPendingEvents([]);
+      setPendingUserEvents([]);
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    if (!canLoad) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canLoad, status]);
+  }, [status, hasToken]);
 
   useEffect(() => {
     localStorage.setItem("admin_apps_status", status);
@@ -102,6 +177,120 @@ export default function AdminApplications() {
 
   const saveToken = () => {
     localStorage.setItem("admin_token", token.trim());
+  };
+
+  const approvePendingEstablishment = async (id: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/admin/establishments/${encodeURIComponent(id)}/approve`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(headers || {}) },
+        body: JSON.stringify({}),
+      });
+      const text = await res.text();
+      if (!res.ok) throw new Error(text);
+      await load();
+    } catch (e: any) {
+      setError(e?.message || "Erreur");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const rejectPendingEstablishment = async (id: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/admin/establishments/${encodeURIComponent(id)}/reject`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(headers || {}) },
+        body: JSON.stringify({}),
+      });
+      const text = await res.text();
+      if (!res.ok) throw new Error(text);
+      await load();
+    } catch (e: any) {
+      setError(e?.message || "Erreur");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const approvePendingEvent = async (id: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/admin/events/${encodeURIComponent(id)}/approve`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(headers || {}) },
+        body: JSON.stringify({}),
+      });
+      const text = await res.text();
+      if (!res.ok) throw new Error(text);
+      await load();
+    } catch (e: any) {
+      setError(e?.message || "Erreur");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const rejectPendingEvent = async (id: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/admin/events/${encodeURIComponent(id)}/reject`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(headers || {}) },
+        body: JSON.stringify({}),
+      });
+      const text = await res.text();
+      if (!res.ok) throw new Error(text);
+      await load();
+    } catch (e: any) {
+      setError(e?.message || "Erreur");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const approvePendingUserEvent = async (id: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/admin/user-events/${encodeURIComponent(id)}/approve`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(headers || {}) },
+        body: JSON.stringify({}),
+      });
+      const text = await res.text();
+      if (!res.ok) throw new Error(text);
+      await load();
+    } catch (e: any) {
+      setError(e?.message || "Erreur");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const rejectPendingUserEvent = async (id: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/admin/user-events/${encodeURIComponent(id)}/reject`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(headers || {}) },
+        body: JSON.stringify({}),
+      });
+      const text = await res.text();
+      if (!res.ok) throw new Error(text);
+      await load();
+    } catch (e: any) {
+      setError(e?.message || "Erreur");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const useMyLocation = () => {
@@ -120,7 +309,7 @@ export default function AdminApplications() {
   };
 
   const runImport = async () => {
-    if (!canLoad) {
+    if (!hasToken) {
       setError("Ajoute ton ADMIN_TOKEN (serveur + page) avant d’importer.");
       return;
     }
@@ -144,7 +333,7 @@ export default function AdminApplications() {
     try {
       const res = await fetch(apiUrl("/api/admin/import/google/nearby"), {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-admin-token": token.trim() },
+        headers: { "Content-Type": "application/json", ...(headers || {}) },
         body: JSON.stringify({
           lat,
           lng,
@@ -164,7 +353,7 @@ export default function AdminApplications() {
   };
 
   const runAbidjanBatch = async () => {
-    if (!canLoad) {
+    if (!hasToken) {
       setError("Ajoute ton ADMIN_TOKEN (serveur + page) avant d’importer.");
       return;
     }
@@ -201,7 +390,7 @@ export default function AdminApplications() {
         setBatchLog((prev) => [...prev, `Import ${c.name}…`]);
         const res = await fetch(apiUrl("/api/admin/import/google/nearby"), {
           method: "POST",
-          headers: { "Content-Type": "application/json", "x-admin-token": token.trim() },
+          headers: { "Content-Type": "application/json", ...(headers || {}) },
           body: JSON.stringify({
             lat: c.lat,
             lng: c.lng,
@@ -311,10 +500,12 @@ export default function AdminApplications() {
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="flex-1 min-w-0">
-            <div className="font-display font-bold truncate">Admin • Demandes établissements</div>
-            <div className="text-xs text-muted-foreground truncate">Valider une demande → publier sur la carte</div>
-          </div>
+            <div className="flex-1 min-w-0">
+              <div className="font-display font-bold truncate">Admin • Modération</div>
+              <div className="text-xs text-muted-foreground truncate">
+                Lieux, évènements Pro et soirées utilisateurs à valider
+              </div>
+            </div>
           <Button variant="outline" onClick={load} disabled={!canLoad || loading}>
             <RefreshCw className="w-4 h-4 mr-2" />
             Rafraîchir
@@ -335,6 +526,9 @@ export default function AdminApplications() {
             <div className="text-xs text-muted-foreground">
               Le token doit aussi être défini côté serveur dans ton `.env` (ADMIN_TOKEN=...).
             </div>
+            <div className="text-xs text-muted-foreground">
+              API utilisée: <code>{apiBase || "(vide) → /api sur le frontend (mauvais en prod)"}</code>
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -348,6 +542,11 @@ export default function AdminApplications() {
               <option value="approved">Approuvées</option>
               <option value="all">Toutes</option>
             </select>
+            {!hasToken && (
+              <span className="text-xs text-amber-700 font-semibold">
+                (Sans token: il faut être connecté en admin sur le même domaine)
+              </span>
+            )}
           </div>
 
           {error && <div className="text-sm text-red-500">{error}</div>}
@@ -436,7 +635,215 @@ export default function AdminApplications() {
           )}
         </div>
 
-        {apps.length === 0 && (
+        {/* Mobile app submissions: pending establishments created via POST /api/establishments */}
+        <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="font-display font-bold">Lieux ajoutés depuis l’app</div>
+              <div className="text-xs text-muted-foreground">
+                En attente de validation (table <code>establishments</code>).
+              </div>
+            </div>
+            <div className="text-xs text-muted-foreground font-semibold">
+              {pendingEstablishments.length} en attente
+            </div>
+          </div>
+
+          {pendingEstablishments.length === 0 ? (
+            <div className="text-sm text-muted-foreground">
+              {loading ? "Chargement…" : "Aucun lieu en attente depuis l’app."}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {pendingEstablishments.map((e) => (
+                <div key={e.id} className="rounded-2xl border border-border bg-background p-4 space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-display font-bold truncate">{e.name}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {e.category}
+                        {e.commune ? ` • ${e.commune}` : ""}
+                        {e.phone ? ` • ${e.phone}` : ""}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {e.owner?.name ? `Par: ${e.owner.name} • ` : ""}
+                        ID: {e.id}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="secondary"
+                        type="button"
+                        disabled={loading || !canLoad}
+                        onClick={() => approvePendingEstablishment(e.id)}
+                      >
+                        Publier
+                      </Button>
+                      <Button
+                        variant="outline"
+                        type="button"
+                        disabled={loading || !canLoad}
+                        onClick={() => rejectPendingEstablishment(e.id)}
+                      >
+                        Refuser
+                      </Button>
+                    </div>
+                  </div>
+                  {!!e.address && <div className="text-xs text-muted-foreground">Adresse: {e.address}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Pro events (establishment events created in the Pro app) */}
+        <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="font-display font-bold">Évènements établissements (Pro)</div>
+              <div className="text-xs text-muted-foreground">
+                Évènements créés par les comptes établissement, en attente de validation.
+              </div>
+            </div>
+            <div className="text-xs text-muted-foreground font-semibold">
+              {pendingEvents.length} en attente
+            </div>
+          </div>
+
+          {pendingEvents.length === 0 ? (
+            <div className="text-sm text-muted-foreground">
+              {loading ? "Chargement…" : "Aucun évènement en attente."}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {pendingEvents.map((ev) => {
+                const firstPhoto = ev.coverUrl || (ev.photos && ev.photos[0]);
+                return (
+                  <div key={ev.id} className="rounded-2xl border border-border bg-background p-4 space-y-3">
+                    <div className="flex items-start gap-3">
+                      {firstPhoto && (
+                        <img
+                          src={firstPhoto}
+                          alt={ev.title}
+                          className="w-20 h-20 rounded-xl object-cover border border-border flex-shrink-0"
+                        />
+                      )}
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="font-display font-bold truncate">{ev.title}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {ev.category || "Évènement"} • {formatDateTime(ev.startsAt)}
+                          {ev.establishment?.name ? ` • ${ev.establishment.name}` : ""}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          Organisateur: {ev.organizer.name} • ID utilisateur: {ev.organizer.userId}
+                        </div>
+                        {ev.establishment?.commune && (
+                          <div className="text-xs text-muted-foreground">
+                            Lieu: {ev.establishment.commune} {ev.establishment.address ? `• ${ev.establishment.address}` : ""}
+                          </div>
+                        )}
+                        {ev.description && (
+                          <div className="text-xs text-muted-foreground line-clamp-3">{ev.description}</div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="secondary"
+                        type="button"
+                        disabled={loading || !canLoad}
+                        onClick={() => approvePendingEvent(ev.id)}
+                      >
+                        Publier
+                      </Button>
+                      <Button
+                        variant="outline"
+                        type="button"
+                        disabled={loading || !canLoad}
+                        onClick={() => rejectPendingEvent(ev.id)}
+                      >
+                        Refuser
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* User-created parties/meetups (“soirées”) */}
+        <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="font-display font-bold">Soirées utilisateurs</div>
+              <div className="text-xs text-muted-foreground">
+                Soirées et rencontres créées par les utilisateurs, à valider avant affichage sur la carte.
+              </div>
+            </div>
+            <div className="text-xs text-muted-foreground font-semibold">
+              {pendingUserEvents.length} en attente
+            </div>
+          </div>
+
+          {pendingUserEvents.length === 0 ? (
+            <div className="text-sm text-muted-foreground">
+              {loading ? "Chargement…" : "Aucune soirée en attente."}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {pendingUserEvents.map((ue) => {
+                const firstPhoto = ue.photos && ue.photos[0];
+                return (
+                  <div key={ue.id} className="rounded-2xl border border-border bg-background p-4 space-y-3">
+                    <div className="flex items-start gap-3">
+                      {firstPhoto && (
+                        <img
+                          src={firstPhoto}
+                          alt={ue.title}
+                          className="w-20 h-20 rounded-xl object-cover border border-border flex-shrink-0"
+                        />
+                      )}
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="font-display font-bold truncate">{ue.title}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {ue.kind === "meet" ? "Rencontre" : "Soirée"} • {formatDateTime(ue.startsAt)}
+                          {typeof ue.ageMin === "number" ? ` • ${ue.ageMin}+` : ""}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          Créateur: {ue.organizer.name} • ID utilisateur: {ue.organizer.userId}
+                        </div>
+                        {ue.description && (
+                          <div className="text-xs text-muted-foreground line-clamp-3">{ue.description}</div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="secondary"
+                        type="button"
+                        disabled={loading || !canLoad}
+                        onClick={() => approvePendingUserEvent(ue.id)}
+                      >
+                        Publier
+                      </Button>
+                      <Button
+                        variant="outline"
+                        type="button"
+                        disabled={loading || !canLoad}
+                        onClick={() => rejectPendingUserEvent(ue.id)}
+                      >
+                        Refuser
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {apps.length === 0 && pendingEstablishments.length === 0 && pendingEvents.length === 0 && pendingUserEvents.length === 0 && (
           <div className="rounded-2xl border border-border bg-card p-6 text-center text-sm text-muted-foreground">
             {loading ? "Chargement…" : "Aucune demande."}
           </div>

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -10,7 +10,7 @@ import { PlaceImage } from '../components/UI/PlaceImage';
 import { useCurrentLocation } from '../stores/useLocationStore';
 import { useLocationStore } from '../stores/useLocationStore';
 import { useStableQueryOrigin } from '../services/queryOrigin';
-import { fetchMyBusinessApplications, fetchMyEstablishments } from '../services/pro';
+import { fetchMyEstablishments } from '../services/pro';
 import { fetchMyEvents } from '../services/events';
 import { fetchProStats } from '../services/analytics';
 
@@ -33,22 +33,7 @@ export default function BusinessDashboardScreen() {
   const isBackendError = !!meError && (meError as any)?.response?.status !== 401;
   const isEmailVerified = !!me && (me as any)?.emailVerified !== false;
 
-  // Centralize verification UI on /verify-email only.
-  useEffect(() => {
-    if (isAuthed && !isEmailVerified) {
-      router.replace('/verify-email');
-    }
-  }, [isAuthed, isEmailVerified, router]);
-
   const canQuery = !hasPermission || !!rawUserLocation;
-
-  const { data: myApps } = useQuery({
-    queryKey: ['pro-my-applications'],
-    enabled: isAuthed,
-    queryFn: () => fetchMyBusinessApplications(),
-    staleTime: 1000 * 20,
-    retry: false,
-  });
 
   const { data: myEsts, error: myEstsError } = useQuery({
     queryKey: ['pro-my-establishments'],
@@ -75,18 +60,23 @@ export default function BusinessDashboardScreen() {
   });
 
   const stats = useMemo(() => {
-    const apps = myApps?.length || 0;
     const ests = myEsts?.length || 0;
     const evs = myEvents?.length || 0;
-    return { apps, ests, evs };
-  }, [myApps, myEsts, myEvents]);
+    return { ests, evs };
+  }, [myEsts, myEvents]);
 
   return (
     <SafeAreaView style={styles.safe}>
       <LinearGradient colors={['#0b1220', '#0b2a6b', '#2563eb']} style={styles.bg}>
         <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
           <View style={styles.topRow}>
-            <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+            <TouchableOpacity
+              style={styles.backBtn}
+              onPress={() => {
+                if ((router as any)?.canGoBack?.()) router.back();
+                else router.replace('/(app)/business');
+              }}
+            >
               <Text style={styles.backText}>←</Text>
             </TouchableOpacity>
             <View style={{ flex: 1 }}>
@@ -133,11 +123,20 @@ export default function BusinessDashboardScreen() {
           {isAuthed && !isEmailVerified && (
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Email non vérifié</Text>
-              <Text style={styles.cardText}>Redirection vers la page de vérification…</Text>
+              <Text style={styles.cardText}>Tu peux visiter l’app, mais publication + itinéraire sont bloqués.</Text>
+              <TouchableOpacity
+                style={[styles.primary, { marginTop: 10 }]}
+                onPress={() => {
+                  const mail = String((me as any)?.email || (me as any)?.username || '').trim();
+                  router.push({ pathname: '/verify-email', params: { email: mail, next: '/(app)/business' } } as any);
+                }}
+              >
+                <Text style={styles.primaryText}>Confirmer mon email</Text>
+              </TouchableOpacity>
             </View>
           )}
 
-          {isAuthed && isEmailVerified && (
+          {isAuthed && (
             <View style={styles.statsRow}>
               <View style={styles.statCard}>
                 <Text style={styles.statValue}>{stats.ests}</Text>
@@ -146,10 +145,6 @@ export default function BusinessDashboardScreen() {
               <View style={styles.statCard}>
                 <Text style={styles.statValue}>{stats.evs}</Text>
                 <Text style={styles.statLabel}>Évènements</Text>
-              </View>
-              <View style={styles.statCard}>
-                <Text style={styles.statValue}>{stats.apps}</Text>
-                <Text style={styles.statLabel}>Demandes</Text>
               </View>
             </View>
           )}
@@ -199,12 +194,6 @@ export default function BusinessDashboardScreen() {
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Établissement</Text>
-            {isAuthed && !isEmailVerified && (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>Email non vérifié</Text>
-                <Text style={styles.cardText}>Redirection vers la page de vérification…</Text>
-              </View>
-            )}
             {isAuthed && !isEstablishment && (
               <View style={styles.card}>
                 <Text style={styles.cardTitle}>Activer le compte établissement</Text>
@@ -216,22 +205,13 @@ export default function BusinessDashboardScreen() {
                 </TouchableOpacity>
               </View>
             )}
-            {isAuthed && isEstablishment && (
+            {isAuthed && (
               <View style={styles.card}>
-                <Text style={styles.cardTitle}>Déclarer un établissement</Text>
-                <Text style={styles.cardText}>Position, photos, infos. Validation admin obligatoire.</Text>
-                <TouchableOpacity style={styles.primary} onPress={() => router.push('/business-apply')}>
-                  <Text style={styles.primaryText}>Nouvelle demande</Text>
+                <Text style={styles.cardTitle}>Ajouter un lieu sur la carte</Text>
+                <Text style={styles.cardText}>Positionne un lieu depuis la carte. L’admin valide avant affichage public.</Text>
+                <TouchableOpacity style={styles.primary} onPress={() => router.push('/map')}>
+                  <Text style={styles.primaryText}>Ouvrir la carte</Text>
                 </TouchableOpacity>
-              </View>
-            )}
-
-            {isAuthed && myApps && myApps.length > 0 && (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>Mes demandes</Text>
-                <Text style={styles.cardText}>
-                  {myApps[0].name} • statut: {String((myApps[0] as any).status || 'pending')}
-                </Text>
               </View>
             )}
 

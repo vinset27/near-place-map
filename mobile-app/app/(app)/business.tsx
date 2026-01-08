@@ -1,222 +1,123 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { authMe } from '../../services/auth';
-import { fetchProProfile } from '../../services/pro';
-import { PlaceImage } from '../../components/UI/PlaceImage';
 import { useAppTheme } from '../../services/settingsTheme';
-import { Divider, SearchBar, SettingsRow, SettingsSection, SkeletonRow } from '../../components/Settings/SettingsPrimitives';
-import { InAppHeroHeader } from '../../components/UI/InAppHeroHeader';
 
-type MenuItem = {
-  key: string;
-  icon: string;
-  title: string;
-  subtitle: string;
-  route: string;
-  requireAuth?: boolean;
-};
+type Item = { title: string; subtitle: string; route: string; requireRole?: 'admin' | 'establishment'; requireProfile?: boolean; requireAuth?: boolean };
 
-export default function BusinessScreen() {
+export default function BusinessMenuScreen() {
   const router = useRouter();
   const t = useAppTheme();
-  const [q, setQ] = useState('');
 
-  const { data: me, error: meError, isLoading: meLoading } = useQuery({
+  const { data: me } = useQuery({
     queryKey: ['auth-me'],
     queryFn: () => authMe(),
     staleTime: 1000 * 20,
     retry: false,
   });
 
-  const isAuthed = !!me && !meError;
-  const isBackendError = !!meError && (meError as any)?.response?.status !== 401;
+  const isAuthed = !!me;
   const role = String((me as any)?.role || 'user');
-  const isEstablishment = role === 'establishment' && (me as any)?.profileCompleted;
-  const isEstablishmentPending = role === 'establishment' && !(me as any)?.profileCompleted;
   const isAdmin = role === 'admin';
+  const isEstablishment = role === 'establishment';
+  const isProfileCompleted = !!(me as any)?.profileCompleted;
 
-  const { data: proProfile } = useQuery({
-    queryKey: ['pro-profile'],
-    enabled: isAuthed,
-    queryFn: () => fetchProProfile(),
-    staleTime: 1000 * 20,
-    retry: false,
-  });
-
-  const contentItems: MenuItem[] = useMemo(
+  const items = useMemo<Item[]>(
     () => [
-      { key: 'dashboard', icon: '📊', title: 'Dashboard', subtitle: 'Statistiques, établissements, évènements', route: '/business-dashboard' },
-      { key: 'trips', icon: '🧭', title: 'Mes trajets', subtitle: 'Historique des itinéraires', route: '/trips', requireAuth: true },
-      { key: 'profile', icon: '🏷️', title: 'Profil établissement', subtitle: 'Photo, réseaux, description, localisation', route: '/profile-establishment', requireAuth: true },
-      { key: 'apply', icon: '📍', title: 'Déclarer un établissement', subtitle: 'Ajouter un lieu (validation)', route: '/business-apply', requireAuth: true },
-      { key: 'event', icon: '📅', title: 'Créer un évènement', subtitle: 'Publier et attirer des visiteurs', route: '/event-create', requireAuth: true },
-      { key: 'user-events', icon: '🎉', title: 'Mes soirées', subtitle: 'Soirées & points de rencontre (publics)', route: '/user-events-my', requireAuth: true },
-      ...(isAdmin ? ([{ key: 'admin', icon: '🛡️', title: 'Admin', subtitle: 'Valider / refuser les publications', route: '/admin', requireAuth: true }] as any) : []),
+      { title: 'Dashboard Pro', subtitle: 'Stats, vues, visiteurs', route: '/business-dashboard', requireRole: 'establishment', requireProfile: true, requireAuth: true },
+      { title: 'Profil établissement', subtitle: 'Photo, description, localisation', route: '/profile-establishment', requireAuth: true },
+      { title: 'Créer un évènement', subtitle: 'En attente de validation admin', route: '/event-create', requireRole: 'establishment', requireProfile: true, requireAuth: true },
+      { title: 'Mes soirées', subtitle: 'Soirées & rencontres', route: '/user-events-my', requireAuth: true },
+      { title: 'Mes trajets', subtitle: 'Historique', route: '/trips', requireAuth: true },
+      { title: 'Ajouter un lieu', subtitle: 'Depuis la carte (validation admin)', route: '/map', requireAuth: true },
+      ...(isAdmin ? ([{ title: 'Admin', subtitle: 'Valider / refuser', route: '/admin', requireAuth: true }] as Item[]) : []),
+      { title: 'Paramètres', subtitle: 'Compte, sécurité, aide', route: '/settings', requireAuth: false },
     ],
     [isAdmin],
   );
 
-  const settingsItems: MenuItem[] = useMemo(
-    () => [
-      { key: 'account', icon: '👤', title: 'Account', subtitle: 'Nom, email, téléphone, rôle, déconnexion', route: '/settings/account' },
-      { key: 'notifications', icon: '🔔', title: 'Notifications', subtitle: 'Contrôle des alertes', route: '/settings/notifications' },
-      { key: 'appearance', icon: '🎨', title: 'Appearance', subtitle: 'Thème, texte, densité', route: '/settings/appearance' },
-      { key: 'privacy', icon: '🔒', title: 'Privacy & Security', subtitle: 'Permissions, visibilité, suppression', route: '/settings/privacy' },
-      { key: 'help', icon: '🧑‍💼', title: 'Help and Support', subtitle: 'FAQ, support, feedback', route: '/settings/help' },
-      { key: 'about', icon: 'ℹ️', title: 'About', subtitle: 'Version, environnement, légal', route: '/settings/about' },
-    ],
-    [],
-  );
-
-  const filtered = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    if (!s) return { content: contentItems, settings: settingsItems };
-    const match = (it: MenuItem) => `${it.title} ${it.subtitle}`.toLowerCase().includes(s);
-    return {
-      content: contentItems.filter(match),
-      settings: settingsItems.filter(match),
-    };
-  }, [contentItems, q, settingsItems]);
-
-  const displayName =
-    (proProfile as any)?.name ||
-    (me?.email || me?.username || 'Utilisateur');
+  const canOpen = (it: Item): { ok: boolean; reason?: string } => {
+    if (it.requireAuth && !isAuthed) return { ok: false, reason: 'Connecte-toi d’abord.' };
+    if (it.requireRole === 'admin' && !isAdmin) return { ok: false, reason: 'Accès admin uniquement.' };
+    if (it.requireRole === 'establishment' && !isEstablishment) return { ok: false, reason: 'Compte établissement requis.' };
+    if (it.requireProfile && !isProfileCompleted) return { ok: false, reason: 'Complète ton profil établissement.' };
+    return { ok: true };
+  };
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: t.bg }]}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
-        <InAppHeroHeader
-          heroImage={require('../../assets/bars.jpg')}
-          title={isAdmin ? 'Espace admin' : 'Espace utilisateur'}
-          subtitle={isAuthed ? (isAdmin ? 'Tous les pouvoirs' : isEstablishment ? 'Compte établissement' : 'Compte utilisateur') : 'Non connecté'}
-          badgeRight={
-            isEstablishment ? (
-              <View style={{ paddingHorizontal: 10, paddingVertical: 8, borderRadius: 999, backgroundColor: 'rgba(11,18,32,0.06)' }}>
-                <Text style={{ color: '#0b1220', fontWeight: '400', fontSize: 12 }}>🏪 Établissement</Text>
-              </View>
-            ) : isAdmin ? (
-              <View style={{ paddingHorizontal: 10, paddingVertical: 8, borderRadius: 999, backgroundColor: 'rgba(37,99,235,0.12)' }}>
-                <Text style={{ color: '#0b1220', fontWeight: '400', fontSize: 12 }}>🛡️ Admin</Text>
-              </View>
-            ) : isEstablishmentPending ? (
-              <View style={{ paddingHorizontal: 10, paddingVertical: 8, borderRadius: 999, backgroundColor: 'rgba(37,99,235,0.10)' }}>
-                <Text style={{ color: '#0b1220', fontWeight: '400', fontSize: 12 }}>🏪 À compléter</Text>
-              </View>
-            ) : null
-          }
-          avatar={
-            <PlaceImage
-              uri={(proProfile as any)?.avatarUrl || null}
-              id="pro-avatar"
-              name={displayName}
-              category={isEstablishment ? 'establishment' : 'user'}
-              style={{ width: 46, height: 46, borderRadius: 18 }}
-              textSize={16}
-            />
-          }
-          primaryAction={
-            !isAuthed
-              ? { label: 'Connexion', onPress: () => router.push('/login') }
-              : { label: 'Mon compte', onPress: () => router.push('/settings/account') }
-          }
-          secondaryAction={
-            !isAuthed ? { label: 'Créer un compte', onPress: () => router.push('/register') } : undefined
-          }
-        />
+    <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24 }}>
+        <Text style={[styles.title, { color: t.text }]}>Espace</Text>
+        <Text style={[styles.sub, { color: t.muted }]}>
+          {isAdmin ? 'Admin' : isEstablishment ? (isProfileCompleted ? 'Compte établissement' : 'Compte établissement (profil à compléter)') : 'Compte utilisateur'}
+        </Text>
 
-        {isAuthed && isEstablishmentPending && (
-          <View style={{ paddingHorizontal: 16, marginTop: 10 }}>
-            <View style={{ borderRadius: 18, borderWidth: 1, borderColor: 'rgba(37,99,235,0.22)', backgroundColor: 'rgba(37,99,235,0.10)', padding: 12 }}>
-              <Text style={{ color: '#0b1220', fontWeight: '900' }}>Compléter votre établissement</Text>
-              <Text style={{ marginTop: 4, color: 'rgba(11,18,32,0.70)', fontWeight: '700', fontSize: 12, lineHeight: 16 }}>
-                Tu peux remplir le profil de ton restaurant plus tard, mais certaines fonctions Pro resteront bloquées tant que ce n’est pas complété.
-              </Text>
-              <TouchableOpacity
-                activeOpacity={0.9}
-                onPress={() => router.push({ pathname: '/post-register', params: { type: 'establishment' } } as any)}
-                style={{ marginTop: 10, alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 999, backgroundColor: '#0b1220' }}
-              >
-                <Text style={{ color: '#fff', fontWeight: '900', fontSize: 12 }}>Compléter maintenant</Text>
+        {!isAuthed && (
+          <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}>
+            <Text style={[styles.cardTitle, { color: t.text }]}>Connexion requise</Text>
+            <Text style={[styles.cardSub, { color: t.muted }]}>Connecte-toi pour gérer tes contenus.</Text>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+              <TouchableOpacity style={[styles.btn, { backgroundColor: t.primary, flex: 1 }]} onPress={() => router.push('/login')}>
+                <Text style={styles.btnText}>Connexion</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.btn, { backgroundColor: t.input, borderColor: t.border, borderWidth: 1, flex: 1 }]} onPress={() => router.push('/register')}>
+                <Text style={[styles.btnText, { color: t.text }]}>Créer</Text>
               </TouchableOpacity>
             </View>
           </View>
         )}
 
-        <SearchBar value={q} onChangeText={setQ} placeholder="Rechercher…" />
-
-        {isBackendError && (
-          <View style={[styles.warn, { backgroundColor: t.card, borderColor: t.border }]}>
-            <Text style={[styles.warnTitle, { color: t.text }]}>Backend indisponible</Text>
-            <Text style={[styles.warnText, { color: t.muted }]}>Ton API ne répond pas. Attends 20–30s puis réessaie.</Text>
-          </View>
-        )}
-
-        <SettingsSection title="Contenu">
-          {meLoading ? (
-            <>
-              <SkeletonRow />
-              <Divider />
-              <SkeletonRow />
-            </>
-          ) : filtered.content.length === 0 ? (
-            <View style={{ paddingHorizontal: 14, paddingVertical: 16 }}>
-              <Text style={{ color: t.text, fontWeight: '900', marginBottom: 6 }}>Aucun résultat</Text>
-              <Text style={{ color: t.muted, fontWeight: '800' }}>Essayez un autre mot-clé.</Text>
-            </View>
-          ) : (
-            filtered.content.map((it, idx) => (
-              <React.Fragment key={it.key}>
-                <SettingsRow
-                  icon={it.icon}
-                  title={it.title}
-                  subtitle={it.subtitle}
-                  onPress={() => {
-                    if (it.requireAuth && !isAuthed) return router.push('/login');
-                    router.push(it.route as any);
-                  }}
-                />
-                {idx !== filtered.content.length - 1 && <Divider />}
-              </React.Fragment>
-            ))
-          )}
-        </SettingsSection>
-
-        <SettingsSection title="Paramètres">
-          {meLoading ? (
-            <>
-              <SkeletonRow />
-              <Divider />
-              <SkeletonRow />
-              <Divider />
-              <SkeletonRow />
-            </>
-          ) : filtered.settings.length === 0 ? (
-            <View style={{ paddingHorizontal: 14, paddingVertical: 16 }}>
-              <Text style={{ color: t.text, fontWeight: '900', marginBottom: 6 }}>Aucun résultat</Text>
-              <Text style={{ color: t.muted, fontWeight: '800' }}>Essayez un autre mot-clé.</Text>
-            </View>
-          ) : (
-            filtered.settings.map((it, idx) => (
-              <React.Fragment key={it.key}>
-                <SettingsRow icon={it.icon} title={it.title} subtitle={it.subtitle} onPress={() => router.push(it.route as any)} />
-                {idx !== filtered.settings.length - 1 && <Divider />}
-              </React.Fragment>
-            ))
-          )}
-        </SettingsSection>
+        <View style={{ marginTop: 12, gap: 10 }}>
+          {items.map((it) => {
+            const decision = canOpen(it);
+            return (
+              <TouchableOpacity
+                key={it.title}
+                activeOpacity={0.9}
+                onPress={() => {
+                  if (!decision.ok) {
+                    if (!isAuthed) return router.push('/login');
+                    if (!isProfileCompleted && isEstablishment) return router.push('/profile-establishment');
+                    return;
+                  }
+                  if (it.route === '/settings') {
+                    return router.push({ pathname: '/settings', params: { backTo: '/(app)/business' } } as any);
+                  }
+                  router.push(it.route as any);
+                }}
+                style={[
+                  styles.card,
+                  {
+                    backgroundColor: t.card,
+                    borderColor: t.border,
+                    opacity: decision.ok ? 1 : 0.6,
+                  },
+                ]}
+              >
+                <Text style={[styles.cardTitle, { color: t.text }]}>{it.title}</Text>
+                <Text style={[styles.cardSub, { color: decision.ok ? t.muted : '#ef4444' }]}>
+                  {decision.ok ? it.subtitle : decision.reason}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1 },
-  warn: { marginTop: 12, marginHorizontal: 14, padding: 14, borderRadius: 18, borderWidth: 1 },
-  warnTitle: { fontWeight: '900', marginBottom: 6 },
-  warnText: { fontWeight: '800', lineHeight: 18 },
+  title: { fontSize: 22, fontWeight: '900' },
+  sub: { marginTop: 4, fontWeight: '700' },
+  card: { borderRadius: 16, borderWidth: 1, padding: 14 },
+  cardTitle: { fontWeight: '900', fontSize: 14 },
+  cardSub: { marginTop: 6, fontWeight: '700', fontSize: 12, lineHeight: 16 },
+  btn: { paddingVertical: 12, borderRadius: 14, alignItems: 'center' },
+  btnText: { color: '#fff', fontWeight: '900' },
 });
 
 

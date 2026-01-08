@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { ScrollView, View, Text } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { authMe } from '../../services/auth';
 import { useAppTheme } from '../../services/settingsTheme';
@@ -19,6 +19,8 @@ export default function SettingsHome() {
   const router = useRouter();
   const t = useAppTheme();
   const [q, setQ] = useState('');
+  const params = useLocalSearchParams();
+  const backTo = typeof (params as any)?.backTo === 'string' ? String((params as any).backTo) : '';
 
   const { data: me, isLoading: meLoading } = useQuery({
     queryKey: ['auth-me'],
@@ -88,7 +90,16 @@ export default function SettingsHome() {
   }, [items, q]);
 
   return (
-    <SettingsScreenShell title="Settings">
+    <SettingsScreenShell
+      title="Settings"
+      onBack={
+        backTo
+          ? () => {
+              router.replace(backTo as any);
+            }
+          : undefined
+      }
+    >
       <SearchBar value={q} onChangeText={setQ} placeholder="Search for a setting…" />
       <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
         <SettingsSection title="Résumé">
