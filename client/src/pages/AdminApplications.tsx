@@ -506,6 +506,9 @@ export default function AdminApplications() {
                 Lieux, évènements Pro et soirées utilisateurs à valider
               </div>
             </div>
+          <Button variant="secondary" onClick={() => setLocation("/admin/moderation")}>
+            Vue complète
+          </Button>
           <Button variant="outline" onClick={load} disabled={!canLoad || loading}>
             <RefreshCw className="w-4 h-4 mr-2" />
             Rafraîchir

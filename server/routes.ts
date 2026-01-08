@@ -2349,10 +2349,18 @@ export async function registerRoutes(
       const userIds = userRows.map((u: any) => String(u.id)).filter(Boolean);
       if (userIds.length === 0) return res.json({ users: [] });
 
+      const profileRows = await db
+        .select()
+        .from(establishmentProfiles)
+        .where(inArray(establishmentProfiles.userId, userIds));
+      const profByUser: Record<string, any> = {};
+      for (const p of profileRows) profByUser[String((p as any).userId)] = p;
+
       const estRows = await db
         .select()
         .from(establishments)
-        .where(inArray(establishments.ownerUserId, userIds))
+        // Only establishments created/owned by real users (not imported ones)
+        .where(and(inArray(establishments.ownerUserId, userIds), sql`${establishments.provider} is null`))
         .orderBy(desc(establishments.createdAt));
 
       const eventRows = await db
@@ -2394,6 +2402,7 @@ export async function registerRoutes(
         const ues = (ueByUser[uid] || []).slice(0, perUserLimit);
         return {
           user: safeUser(u),
+          establishmentProfile: profByUser[uid] || null,
           counts: {
             establishments: (estByUser[uid] || []).length,
             events: (evByUser[uid] || []).length,
@@ -2406,6 +2415,59 @@ export async function registerRoutes(
       });
 
       return res.json({ users: usersWithContent });
+    }),
+  );
+
+  // Admin: single user details + content (focus on manageable content, exclude imports)
+  app.get(
+    "/api/admin/users/:id/with-content",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+      if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+      const id = String(req.params.id || "").trim();
+      if (!isUuidLike(id)) return res.status(400).json({ message: "Invalid id" });
+      const perTypeLimit = Math.min(300, Math.max(1, Number(req.query.perTypeLimit || 120)));
+
+      const userRows = await db
+        .select()
+        .from(users)
+        .where(and(eq(users.id, id as any), sql`${users.deletedAt} is null`))
+        .limit(1);
+      const u = userRows[0] as any;
+      if (!u) return res.status(404).json({ message: "User not found" });
+
+      const profRows = await db.select().from(establishmentProfiles).where(eq(establishmentProfiles.userId, id as any)).limit(1);
+      const profile = (profRows[0] as any) || null;
+
+      const estRows = await db
+        .select()
+        .from(establishments)
+        .where(and(eq(establishments.ownerUserId, id as any), sql`${establishments.provider} is null`))
+        .orderBy(desc(establishments.createdAt))
+        .limit(perTypeLimit);
+
+      const eventRows = await db
+        .select()
+        .from(events)
+        .where(eq(events.userId, id as any))
+        .orderBy(desc(events.createdAt))
+        .limit(perTypeLimit);
+
+      const userEventRows = await db
+        .select()
+        .from(userEvents)
+        .where(eq(userEvents.userId, id as any))
+        .orderBy(desc(userEvents.createdAt))
+        .limit(perTypeLimit);
+
+      return res.json({
+        user: safeUser(u),
+        establishmentProfile: profile,
+        counts: { establishments: estRows.length, events: eventRows.length, userEvents: userEventRows.length },
+        establishments: estRows,
+        events: eventRows,
+        userEvents: userEventRows,
+      });
     }),
   );
 

@@ -6,7 +6,20 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAppTheme } from '../../services/settingsTheme';
 import { authMe } from '../../services/auth';
-import { adminCreateUser, approveEstablishment, approveProEvent, approveUserEvent, fetchPendingModeration, rejectEstablishment, rejectProEvent, rejectUserEvent, setUserRole } from '../../services/admin';
+import {
+  adminCreateUser,
+  approveEstablishment,
+  approveProEvent,
+  approveUserEvent,
+  deleteEstablishment,
+  deleteProEvent,
+  deleteUserEvent,
+  fetchPendingModeration,
+  rejectEstablishment,
+  rejectProEvent,
+  rejectUserEvent,
+  setUserRole,
+} from '../../services/admin';
 import { resendTestEmail } from '../../services/admin';
 
 const KEY = 'nearplace:adminToken:v1';
@@ -47,7 +60,7 @@ export default function AdminScreen() {
   const { data, error, isLoading, refetch } = useQuery({
     queryKey: ['admin-pending', effectiveToken || 'session'],
     enabled: isAdminRole || !!effectiveToken,
-    queryFn: () => fetchPendingModeration({ token: effectiveToken, limit: 200 }),
+    queryFn: () => fetchPendingModeration({ token: effectiveToken, limit: 200, includePublished: true }),
     staleTime: 1000 * 5,
     retry: false,
   });
@@ -55,6 +68,9 @@ export default function AdminScreen() {
   const pendingEsts = useMemo(() => (data as any)?.pending?.establishments || [], [data]);
   const pendingEvents = useMemo(() => (data as any)?.pending?.events || [], [data]);
   const pendingUserEvents = useMemo(() => (data as any)?.pending?.userEvents || [], [data]);
+  const publishedEsts = useMemo(() => (data as any)?.published?.establishments || [], [data]);
+  const publishedEvents = useMemo(() => (data as any)?.published?.events || [], [data]);
+  const publishedUserEvents = useMemo(() => (data as any)?.published?.userEvents || [], [data]);
 
   const saveToken = async () => {
     await AsyncStorage.setItem(KEY, String(token || '')).catch(() => {});
@@ -262,19 +278,32 @@ export default function AdminScreen() {
         </View>
 
         <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}>
-          <Text style={[styles.cardTitle, { color: t.text }]}>En attente</Text>
+          <Text style={[styles.cardTitle, { color: t.text }]}>Modération (page dédiée)</Text>
+          <Text style={[styles.cardText, { color: t.muted }]}>
+            Ouvre la page dédiée pour voir les contenus en attente et publiés, avec actions publier / refuser / supprimer.
+          </Text>
+          <TouchableOpacity
+            style={[styles.primary, { backgroundColor: t.primary, marginTop: 6 }]}
+            onPress={() => router.push('/admin/moderation')}
+          >
+            <Text style={styles.primaryText}>Ouvrir la modération</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}>
+          <Text style={[styles.cardTitle, { color: t.text }]}>Publié récemment</Text>
           {isLoading ? <Text style={[styles.cardText, { color: t.muted }]}>Chargement…</Text> : null}
           {!!error ? <Text style={[styles.cardText, { color: t.muted }]}>{String((error as any)?.message || error)}</Text> : null}
 
           <View style={{ marginTop: 10 }}>
             <Text style={[styles.kicker, { color: t.muted }]}>Établissements</Text>
-            {pendingEsts.length === 0 ? (
+            {publishedEsts.length === 0 ? (
               <Text style={[styles.cardText, { color: t.muted }]}>— Aucun</Text>
             ) : (
-              pendingEsts.slice(0, 80).map((est: any) => (
+              publishedEsts.slice(0, 50).map((est: any) => (
                 <View key={String(est.id)} style={[styles.row, { borderColor: t.border }]}>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ color: t.text, fontWeight: '950' }} numberOfLines={1}>
+                    <Text style={{ color: t.text, fontWeight: '900' }} numberOfLines={1}>
                       {String(est.name || '—')}
                     </Text>
                     <Text style={{ color: t.muted, fontWeight: '800', marginTop: 4 }} numberOfLines={2}>
@@ -282,31 +311,21 @@ export default function AdminScreen() {
                     </Text>
                   </View>
                   <TouchableOpacity
-                    style={[styles.approve, { backgroundColor: 'rgba(34,197,94,0.16)', borderColor: 'rgba(34,197,94,0.30)' }]}
-                    onPress={async () => {
-                      await approveEstablishment(String(est.id), effectiveToken);
-                      setToast('Approuvé.');
-                      await qc.invalidateQueries({ queryKey: ['admin-pending'] });
-                    }}
-                  >
-                    <Text style={{ color: '#22c55e', fontWeight: '950' }}>✓</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
                     style={[styles.reject, { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.26)' }]}
                     onPress={async () => {
                       const ok = await new Promise<boolean>((resolve) => {
-                        Alert.alert('Rejeter', 'Supprimer cet établissement ?', [
+                        Alert.alert('Supprimer', 'Supprimer définitivement cet établissement ?', [
                           { text: 'Annuler', style: 'cancel', onPress: () => resolve(false) },
                           { text: 'Supprimer', style: 'destructive', onPress: () => resolve(true) },
                         ]);
                       });
                       if (!ok) return;
-                      await rejectEstablishment(String(est.id), effectiveToken);
-                      setToast('Rejeté.');
+                      await deleteEstablishment(String(est.id), effectiveToken);
+                      setToast('Supprimé.');
                       await qc.invalidateQueries({ queryKey: ['admin-pending'] });
                     }}
                   >
-                    <Text style={{ color: '#ef4444', fontWeight: '950' }}>✕</Text>
+                    <Text style={{ color: '#ef4444', fontWeight: '900' }}>✕</Text>
                   </TouchableOpacity>
                 </View>
               ))
@@ -315,13 +334,13 @@ export default function AdminScreen() {
 
           <View style={{ marginTop: 14 }}>
             <Text style={[styles.kicker, { color: t.muted }]}>Événements établissements</Text>
-            {pendingEvents.length === 0 ? (
+            {publishedEvents.length === 0 ? (
               <Text style={[styles.cardText, { color: t.muted }]}>— Aucun</Text>
             ) : (
-              pendingEvents.slice(0, 50).map((ev: any) => (
+              publishedEvents.slice(0, 50).map((ev: any) => (
                 <View key={String(ev.id)} style={[styles.row, { borderColor: t.border }]}>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ color: t.text, fontWeight: '950' }} numberOfLines={1}>
+                    <Text style={{ color: t.text, fontWeight: '900' }} numberOfLines={1}>
                       {String(ev.title || '—')}
                     </Text>
                     <Text style={{ color: t.muted, fontWeight: '800', marginTop: 4 }} numberOfLines={2}>
@@ -329,33 +348,21 @@ export default function AdminScreen() {
                     </Text>
                   </View>
                   <TouchableOpacity
-                    style={[styles.approve, { backgroundColor: 'rgba(34,197,94,0.16)', borderColor: 'rgba(34,197,94,0.30)' }]}
-                    onPress={async () => {
-                      await approveProEvent(String(ev.id), effectiveToken);
-                      setToast('Approuvé.');
-                      await qc.invalidateQueries({ queryKey: ['admin-pending'] });
-                    }}
-                  >
-                    <Text style={{ color: '#22c55e', fontWeight: '950' }}>✓</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
                     style={[styles.reject, { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.26)' }]}
                     onPress={async () => {
-                      const reason = await new Promise<string | null>((resolve) => {
-                        Alert.alert('Refuser', 'Choisir un motif', [
-                          { text: 'Spam', onPress: () => resolve('Spam') },
-                          { text: 'Contenu inapproprié', onPress: () => resolve('Contenu inapproprié') },
-                          { text: 'Infos insuffisantes', onPress: () => resolve('Infos insuffisantes') },
-                          { text: 'Annuler', style: 'cancel', onPress: () => resolve(null) },
+                      const ok = await new Promise<boolean>((resolve) => {
+                        Alert.alert('Supprimer', 'Supprimer définitivement cet évènement ?', [
+                          { text: 'Annuler', style: 'cancel', onPress: () => resolve(false) },
+                          { text: 'Supprimer', style: 'destructive', onPress: () => resolve(true) },
                         ]);
                       });
-                      if (!reason) return;
-                      await rejectProEvent(String(ev.id), effectiveToken, reason);
-                      setToast('Refusé.');
+                      if (!ok) return;
+                      await deleteProEvent(String(ev.id), effectiveToken);
+                      setToast('Supprimé.');
                       await qc.invalidateQueries({ queryKey: ['admin-pending'] });
                     }}
                   >
-                    <Text style={{ color: '#ef4444', fontWeight: '950' }}>✕</Text>
+                    <Text style={{ color: '#ef4444', fontWeight: '900' }}>✕</Text>
                   </TouchableOpacity>
                 </View>
               ))
@@ -364,13 +371,13 @@ export default function AdminScreen() {
 
           <View style={{ marginTop: 14 }}>
             <Text style={[styles.kicker, { color: t.muted }]}>Soirées users</Text>
-            {pendingUserEvents.length === 0 ? (
+            {publishedUserEvents.length === 0 ? (
               <Text style={[styles.cardText, { color: t.muted }]}>— Aucun</Text>
             ) : (
-              pendingUserEvents.slice(0, 80).map((ue: any) => (
+              publishedUserEvents.slice(0, 80).map((ue: any) => (
                 <View key={String(ue.id)} style={[styles.row, { borderColor: t.border }]}>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ color: t.text, fontWeight: '950' }} numberOfLines={1}>
+                    <Text style={{ color: t.text, fontWeight: '900' }} numberOfLines={1}>
                       {String(ue.title || '—')}
                     </Text>
                     <Text style={{ color: t.muted, fontWeight: '800', marginTop: 4 }} numberOfLines={2}>
@@ -378,33 +385,21 @@ export default function AdminScreen() {
                     </Text>
                   </View>
                   <TouchableOpacity
-                    style={[styles.approve, { backgroundColor: 'rgba(34,197,94,0.16)', borderColor: 'rgba(34,197,94,0.30)' }]}
-                    onPress={async () => {
-                      await approveUserEvent(String(ue.id), effectiveToken);
-                      setToast('Approuvé.');
-                      await qc.invalidateQueries({ queryKey: ['admin-pending'] });
-                    }}
-                  >
-                    <Text style={{ color: '#22c55e', fontWeight: '950' }}>✓</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
                     style={[styles.reject, { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.26)' }]}
                     onPress={async () => {
-                      const reason = await new Promise<string | null>((resolve) => {
-                        Alert.alert('Refuser', 'Choisir un motif', [
-                          { text: 'Spam', onPress: () => resolve('Spam') },
-                          { text: 'Contenu inapproprié', onPress: () => resolve('Contenu inapproprié') },
-                          { text: 'Infos insuffisantes', onPress: () => resolve('Infos insuffisantes') },
-                          { text: 'Annuler', style: 'cancel', onPress: () => resolve(null) },
+                      const ok = await new Promise<boolean>((resolve) => {
+                        Alert.alert('Supprimer', 'Supprimer définitivement cette soirée ?', [
+                          { text: 'Annuler', style: 'cancel', onPress: () => resolve(false) },
+                          { text: 'Supprimer', style: 'destructive', onPress: () => resolve(true) },
                         ]);
                       });
-                      if (!reason) return;
-                      await rejectUserEvent(String(ue.id), effectiveToken, reason);
-                      setToast('Refusé.');
+                      if (!ok) return;
+                      await deleteUserEvent(String(ue.id), effectiveToken);
+                      setToast('Supprimé.');
                       await qc.invalidateQueries({ queryKey: ['admin-pending'] });
                     }}
                   >
-                    <Text style={{ color: '#ef4444', fontWeight: '950' }}>✕</Text>
+                    <Text style={{ color: '#ef4444', fontWeight: '900' }}>✕</Text>
                   </TouchableOpacity>
                 </View>
               ))
@@ -421,17 +416,17 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12, borderBottomWidth: 1 },
   backBtn: { width: 44, height: 44, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   backText: { fontWeight: '900', fontSize: 18 },
-  title: { fontWeight: '950', fontSize: 16 },
+  title: { fontWeight: '900', fontSize: 16 },
   sub: { marginTop: 4, fontWeight: '800', fontSize: 12 },
   toast: { borderRadius: 14, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12 },
   card: { borderRadius: 18, borderWidth: 1, padding: 14, marginBottom: 12, gap: 10 },
-  cardTitle: { fontWeight: '950', fontSize: 14 },
+  cardTitle: { fontWeight: '900', fontSize: 14 },
   cardText: { fontWeight: '800', fontSize: 12, lineHeight: 16 },
   input: { borderRadius: 16, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 12, fontWeight: '800' },
   primary: { borderRadius: 16, paddingVertical: 14, alignItems: 'center' },
-  primaryText: { color: '#fff', fontWeight: '950' },
+  primaryText: { color: '#fff', fontWeight: '900' },
   ghost: { borderRadius: 16, paddingVertical: 14, alignItems: 'center', borderWidth: 1 },
-  ghostText: { fontWeight: '950' },
+  ghostText: { fontWeight: '900' },
   kicker: { fontWeight: '900', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.3 },
   row: { borderTopWidth: 1, paddingTop: 10, marginTop: 10, flexDirection: 'row', alignItems: 'center', gap: 10 },
   approve: { width: 42, height: 42, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },

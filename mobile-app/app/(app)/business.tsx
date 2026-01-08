@@ -33,7 +33,12 @@ export default function BusinessMenuScreen() {
       { title: 'Mes soirées', subtitle: 'Soirées & rencontres', route: '/user-events-my', requireAuth: true },
       { title: 'Mes trajets', subtitle: 'Historique', route: '/trips', requireAuth: true },
       { title: 'Ajouter un lieu', subtitle: 'Depuis la carte (validation admin)', route: '/map', requireAuth: true },
-      ...(isAdmin ? ([{ title: 'Admin', subtitle: 'Valider / refuser', route: '/admin', requireAuth: true }] as Item[]) : []),
+      ...(isAdmin
+        ? ([
+            { title: 'Admin • Modération', subtitle: 'En attente, publié, suppression', route: '/admin/moderation', requireAuth: true },
+            { title: 'Admin • Comptes', subtitle: 'Rôles, création, token', route: '/admin', requireAuth: true },
+          ] as Item[])
+        : []),
       { title: 'Paramètres', subtitle: 'Compte, sécurité, aide', route: '/settings', requireAuth: false },
     ],
     [isAdmin],
