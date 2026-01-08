@@ -20,7 +20,7 @@ import {
 import { hashPassword, verifyPassword } from "./auth";
 import { db, ensureAppTables } from "./db";
 import { pool } from "./db";
-import { and, desc, eq, gte, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lte, or, sql, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { presignBusinessPhotoPut, presignEventMediaGet, presignEventMediaPut, presignUserEventMediaPut } from "./r2";
 import { googlePlacesNearbyAll, mapGoogleTypesToCategory } from "./googlePlaces";
@@ -2196,6 +2196,8 @@ export async function registerRoutes(
     asyncHandler(async (req, res) => {
       if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
       const limit = Math.min(500, Math.max(1, Number(req.query.limit || 200)));
+      const includePublished = String(req.query.includePublished || "").toLowerCase() === "true" || req.query.includePublished === "1";
+      const pubLimit = Math.min(300, Math.max(1, Number(req.query.pubLimit || 120)));
 
       const pendingEstablishments = await db
         .select({
@@ -2236,6 +2238,47 @@ export async function registerRoutes(
         .orderBy(desc(userEvents.createdAt))
         .limit(limit);
 
+      const published = includePublished
+        ? {
+            establishments: await db
+              .select({
+                est: establishments,
+                owner: users,
+                prof: establishmentProfiles,
+              })
+              .from(establishments)
+              .leftJoin(users, eq(establishments.ownerUserId, users.id))
+              .leftJoin(establishmentProfiles, eq(establishments.ownerUserId, establishmentProfiles.userId))
+              .where(eq(establishments.published, true))
+              .orderBy(desc(establishments.createdAt))
+              .limit(pubLimit),
+            events: await db
+              .select({
+                ev: events,
+                est: establishments,
+                prof: establishmentProfiles,
+                user: users,
+              })
+              .from(events)
+              .leftJoin(establishments, eq(events.establishmentId, establishments.id))
+              .leftJoin(establishmentProfiles, eq(events.userId, establishmentProfiles.userId))
+              .leftJoin(users, eq(events.userId, users.id))
+              .where(eq(events.published, true))
+              .orderBy(desc(events.createdAt))
+              .limit(pubLimit),
+            userEvents: await db
+              .select({
+                ue: userEvents,
+                user: users,
+              })
+              .from(userEvents)
+              .leftJoin(users, eq(userEvents.userId, users.id))
+              .where(eq(userEvents.published, true))
+              .orderBy(desc(userEvents.createdAt))
+              .limit(pubLimit),
+          }
+        : null;
+
       return res.json({
         pending: {
           establishments: pendingEstablishments.map((r: any) => ({
@@ -2259,7 +2302,110 @@ export async function registerRoutes(
             organizer: { userId: String(r.user?.id || r.ue.userId), name: String(r.user?.username || "Utilisateur") },
           })),
         },
+        published: published
+          ? {
+              establishments: published.establishments.map((r: any) => ({
+                ...r.est,
+                owner: {
+                  userId: String(r.owner?.id || r.est.ownerUserId || ""),
+                  name: String(r.prof?.name || r.owner?.username || "Propriétaire"),
+                },
+              })),
+              events: published.events.map((r: any) => ({
+                ...r.ev,
+                establishment: r.est || null,
+                organizer: {
+                  userId: String(r.user?.id || r.ev.userId),
+                  name: String(r.prof?.name || r.user?.username || "Organisateur"),
+                  avatarUrl: r.prof?.avatarUrl || null,
+                },
+              })),
+              userEvents: published.userEvents.map((r: any) => ({
+                ...r.ue,
+                organizer: { userId: String(r.user?.id || r.ue.userId), name: String(r.user?.username || "Utilisateur") },
+              })),
+            }
+          : undefined,
       });
+    }),
+  );
+
+  // Admin: list users with their publications (establishments, events, user events)
+  app.get(
+    "/api/admin/users/with-content",
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+      if (!db) return res.status(500).json({ message: "DATABASE_URL not configured" });
+      const limit = Math.min(500, Math.max(1, Number(req.query.limit || 200)));
+      const perUserLimit = Math.min(100, Math.max(1, Number(req.query.perUserLimit || 30)));
+
+      const userRows = await db
+        .select()
+        .from(users)
+        .where(sql`${users.deletedAt} is null`)
+        .orderBy(desc(users.createdAt))
+        .limit(limit);
+
+      const userIds = userRows.map((u: any) => String(u.id)).filter(Boolean);
+      if (userIds.length === 0) return res.json({ users: [] });
+
+      const estRows = await db
+        .select()
+        .from(establishments)
+        .where(inArray(establishments.ownerUserId, userIds))
+        .orderBy(desc(establishments.createdAt));
+
+      const eventRows = await db
+        .select()
+        .from(events)
+        .where(inArray(events.userId, userIds))
+        .orderBy(desc(events.createdAt));
+
+      const userEventRows = await db
+        .select()
+        .from(userEvents)
+        .where(inArray(userEvents.userId, userIds))
+        .orderBy(desc(userEvents.createdAt));
+
+      const estByUser: Record<string, any[]> = {};
+      const evByUser: Record<string, any[]> = {};
+      const ueByUser: Record<string, any[]> = {};
+
+      for (const est of estRows) {
+        const k = String((est as any).ownerUserId || "");
+        if (!k) continue;
+        (estByUser[k] ||= []).push(est);
+      }
+      for (const ev of eventRows) {
+        const k = String((ev as any).userId || "");
+        if (!k) continue;
+        (evByUser[k] ||= []).push(ev);
+      }
+      for (const ue of userEventRows) {
+        const k = String((ue as any).userId || "");
+        if (!k) continue;
+        (ueByUser[k] ||= []).push(ue);
+      }
+
+      const usersWithContent = userRows.map((u: any) => {
+        const uid = String(u.id);
+        const ests = (estByUser[uid] || []).slice(0, perUserLimit);
+        const evs = (evByUser[uid] || []).slice(0, perUserLimit);
+        const ues = (ueByUser[uid] || []).slice(0, perUserLimit);
+        return {
+          user: safeUser(u),
+          counts: {
+            establishments: (estByUser[uid] || []).length,
+            events: (evByUser[uid] || []).length,
+            userEvents: (ueByUser[uid] || []).length,
+          },
+          establishments: ests,
+          events: evs,
+          userEvents: ues,
+        };
+      });
+
+      return res.json({ users: usersWithContent });
     }),
   );
 
